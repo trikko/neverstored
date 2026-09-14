@@ -50,7 +50,7 @@ body {
 .brand {
    display: inline-flex;
    align-items: center;
-   gap: 10px;
+   gap: 7px;
    color: var(--ink);
    font-size: 19px;
    font-weight: 640;
@@ -58,9 +58,12 @@ body {
    text-decoration: none;
 }
 
+/* Centred on the word, not on the line box: lowercase text carries its mass below the middle,
+   so a mark centred by the box alone reads a hair high. */
 .mark {
-   width: 19px;
-   height: 19px;
+   width: 20px;
+   height: 20px;
+   transform: translateY(1px);
    background: url("/icon.svg") center / contain no-repeat;
 }
 
