@@ -31,10 +31,13 @@
    <p>The client encrypts on your machine, exactly as the page does in a browser: what
    reaches the server is a public key and a block of bytes it cannot read.</p>
 
-   <h2>Build it</h2>
+   <h2>Get it</h2>
+   <p>You can grab the latest binaries for Linux and macOS from the <a href="https://github.com/trikko/neverstored/releases/latest" target="_blank" rel="noopener">latest release</a>.</p>
+   <p>The client needs <code>libcrypto</code> and <code>libcurl</code>, which your system likely already has. If not, install them via your package manager (e.g., <code>apt install libcurl4 libssl3</code> on Debian/Ubuntu, or <code>brew install openssl curl</code> on macOS).</p>
+
+   <h2>Build it from source</h2>
    <pre>git clone https://github.com/trikko/neverstored
 cd neverstored/cli &amp;&amp; dub build --build=release</pre>
-   <p>It needs libcrypto and libcurl, which your system already has.</p>
 
    <h2>Hand a secret over</h2>
    <pre>neverstored send --file api-key.txt</pre>

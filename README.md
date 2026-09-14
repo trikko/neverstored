@@ -107,8 +107,17 @@ rooms for the whole instance is left. It is meant for a laptop, not for a public
 
 ## From the terminal
 
+You can download the latest pre-compiled binaries for Linux and macOS from the [latest release](https://github.com/trikko/neverstored/releases/latest).
+
+Alternatively, you can build it from source:
+
 ```
 cd cli && dub build --build=release
+```
+
+Usage:
+
+```
 ./neverstored send --file api-key.txt     # prints a link and a code to scan
 ./neverstored open <link>                 # from the other machine
 ./neverstored ask > key.txt               # the other direction
@@ -122,8 +131,7 @@ symbols are always confirmed by a person: there is no flag to skip that.
 
 It talks to `https://neverstored.com` unless `NEVERSTORED_URL` or `--url` says otherwise,
 so pointing it at your own instance is one variable.
-The client needs libcrypto and libcurl; the server still needs nothing. See `/cli` on a
-running instance for the full usage.
+The client needs `libcrypto` and `libcurl`. Most systems already have them, but if missing, you can install them via your package manager (e.g., `apt install libcurl4 libssl3` on Debian/Ubuntu, or `brew install openssl curl` on macOS). The server still needs nothing. See `/cli` on a running instance for the full usage.
 
 ## Tests
 
