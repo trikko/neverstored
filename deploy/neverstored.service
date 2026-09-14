@@ -1,0 +1,38 @@
+# Plain http on a local port: TLS and the visitor's address belong to the proxy in front.
+# See ./Caddyfile or ./nginx.conf — without X-Forwarded-For this service refuses to open
+# rooms and says so on every page. An instance knowingly run with nothing in front of it
+# wants Environment=NEVERSTORED_NO_PROXY=1, which drops the per-visitor limit along with
+# the requirement.
+#
+# Only the executable needs deploying: every page, script and stylesheet is compiled into it.
+
+[Unit]
+Description=neverstored
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/neverstored
+Environment=NEVERSTORED_PORT=8080
+Environment=NEVERSTORED_BIND=127.0.0.1
+Environment=NEVERSTORED_SOCKET=/run/neverstored/broker.sock
+RuntimeDirectory=neverstored
+RuntimeDirectoryMode=0700
+User=neverstored
+Group=neverstored
+Restart=on-failure
+
+# Nothing is meant to be written, so nothing is writable.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=no
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target

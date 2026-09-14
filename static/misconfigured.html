@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>neverstored</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="page">
+<header class="top">
+   <a class="brand" href="/"><span class="mark"></span>neverstored</a>
+</header>
+<main class="card">
+   <p class="verdict">This instance is misconfigured</p>
+   <p class="hint">Requests are arriving without an <code>X-Forwarded-For</code> header, so this
+   server cannot tell one visitor from another and will not open rooms: a single visitor could
+   otherwise fill its memory for everybody.</p>
+   <p class="hint">Whoever runs it should have the reverse proxy pass the address it accepted
+   the connection from. There is a Caddyfile and an nginx example in <code>deploy/</code>. An
+   instance deliberately run with no proxy in front of it wants
+   <code>NEVERSTORED_NO_PROXY=1</code> instead, which drops the per-visitor limit along with
+   the requirement.</p>
+</main>
+<footer class="bottom">Open source. <a href="https://github.com/trikko/neverstored" target="_blank" rel="noopener">Run your own</a>.</footer>
+</div>
+</body>
+</html>

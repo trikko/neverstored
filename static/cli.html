@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>From the terminal — neverstored</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="page">
+<header class="top">
+   <a class="brand" href="/"><span class="mark"></span>neverstored</a>
+   <a class="quiet" href="/">Back</a>
+</header>
+
+<main class="card prose">
+   <p class="claim">The same exchange, without leaving the shell.</p>
+   <p>The client encrypts on your machine, exactly as the page does in a browser: what
+   reaches the server is a public key and a block of bytes it cannot read.</p>
+
+   <h2>Build it</h2>
+   <pre>git clone https://github.com/trikko/neverstored
+cd neverstored/cli &amp;&amp; dub build --build=release</pre>
+   <p>It needs libcrypto and libcurl, which your system already has.</p>
+
+   <h2>Hand a secret over</h2>
+   <pre>neverstored send --file api-key.txt</pre>
+   <p>It prints a link and a code to scan, then waits. Send the link however you like and
+   keep the terminal open: the secret is still on your machine. When the other side arrives
+   you both check four symbols, and only then does it travel.</p>
+
+   <h2>Ask for one</h2>
+   <pre>neverstored ask &gt; key.txt</pre>
+   <p>Same thing the other way round: they write, you receive. What arrives goes to standard
+   output and nothing else does, so redirecting it works as it looks.</p>
+
+   <h2>Open a link you were given</h2>
+   <pre>neverstored open https://neverstored.com/r/…</pre>
+   <p>You do not have to say which direction it is: the room knows. If it turns out you are
+   the one holding the secret, it will ask for it.</p>
+
+   <h2>Where the secret comes from</h2>
+   <p>From <code>--file</code>, from standard input when something is piped in, or typed at
+   the terminal without echo. There is deliberately no option to pass it as an argument:
+   that would put it in the process list and in your shell history.</p>
+
+   <h2>Up to 8 KB</h2>
+   <p>Enough for a password, a key or a short config, and not enough to move files. Past
+   that the client stops before anything leaves your machine.</p>
+
+   <h2>The question is always asked</h2>
+   <p>The four symbols have to be confirmed by a person, every time. There is no flag to
+   skip it, because skipping it removes the only thing standing between you and someone in
+   the middle. With no terminal the answer is read from standard input; if nothing answers,
+   the exchange stops. Silence is never a yes.</p>
+
+   <h2>Settings</h2>
+   <pre>NEVERSTORED_URL=https://neverstored.com   # or your own instance
+--wait 60     give up after a minute of waiting
+--dense       draw the code half as tall
+--no-qr       do not draw it at all</pre>
+
+   <h2>Exit codes</h2>
+   <pre>0  handed over, or received
+1  the symbols were refused
+2  the room is gone, expired, or nobody came
+3  the service could not be reached
+4  wrong usage</pre>
+
+   <p>It talks to the same rooms the pages use, so a link made in a terminal opens in a
+   browser and the other way round.</p>
+</main>
+<footer class="bottom"><a href="/">Back to the site</a> Open source. <a href="https://github.com/trikko/neverstored" target="_blank" rel="noopener">Run your own</a>.</footer>
+</div>
+</body>
+</html>

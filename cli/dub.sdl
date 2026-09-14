@@ -1,0 +1,23 @@
+name "neverstored-cli"
+description "Hand a secret over from the terminal."
+authors "Andrea Fontana"
+license "AGPL-3.0-or-later"
+targetType "executable"
+targetName "neverstored"
+mainSourceFile "source/app.d"
+stringImportPaths "../static"
+dependency "qr" version="~>1.0"
+libs "crypto"
+
+configuration "application" {
+   targetName "neverstored"
+   mainSourceFile "source/app.d"
+   excludedSourceFiles "tests/probe.d"
+}
+
+configuration "probe" {
+   targetName "probe"
+   mainSourceFile "tests/probe.d"
+   excludedSourceFiles "source/app.d"
+   sourcePaths "source" "tests"
+}

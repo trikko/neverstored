@@ -1,0 +1,11 @@
+/neverstored
+/neverstored-test-application
+/cli/neverstored
+/cli/neverstored-cli-test-application
+/cli/probe
+*.o
+.dub/
+dub.selections.json
+
+# Internal, not published
+/CLAUDE.md

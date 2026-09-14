@@ -1,0 +1,15 @@
+name "neverstored"
+description "Hand a secret to someone while you are both there. Nothing is ever stored."
+authors "Andrea Fontana"
+license "AGPL-3.0-or-later"
+targetType "executable"
+mainSourceFile "source/app.d"
+stringImportPaths "static"
+dependency "serverino" version="~>0.8"
+
+buildType "small" {
+	buildOptions "releaseMode" "optimize"
+	dflags "-Oz" "-L=--gc-sections" "-linker=lld" "-L=--icf=all" platform="ldc"
+	dflags "-L--gc-sections" platform="dmd"
+	postBuildCommands "test -f \"$DUB_TARGET_PATH/$DUB_TARGET_NAME\" && strip -s \"$DUB_TARGET_PATH/$DUB_TARGET_NAME\" || true" platform="posix"
+}

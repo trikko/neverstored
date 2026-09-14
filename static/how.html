@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How it works — neverstored</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="page">
+<header class="top">
+   <a class="brand" href="/"><span class="mark"></span>neverstored</a>
+   <a class="quiet" href="/">Back</a>
+</header>
+
+<main class="card prose">
+   <p class="claim">Your secret is never stored. Not encrypted at rest — never written.</p>
+
+   <h2>Where the encryption happens</h2>
+   <p><strong>In your browser, before anything is sent.</strong> The page uses the
+   cryptography built into the browser itself: the two devices agree on a key between
+   themselves, and the secret is encrypted on yours and decrypted on theirs.</p>
+   <p>What our server receives is two public keys — which are public by definition — and a
+   block of encrypted bytes it has no key for. It is a relay, not a keeper: there is no copy
+   of the key here to lose, to leak, or to hand over to anyone who asks for it.</p>
+
+   <h2>Step by step</h2>
+   <ol class="walk">
+      <li><strong>Alice opens a room.</strong> Her browser creates a key pair on the spot.
+      Only the public half is sent to us, together with the request to open a room, and the
+      room is created in memory.</li>
+
+      <li><strong>Bob follows the link.</strong> His browser makes a key pair of its own and
+      sends us its public half. The room is now a pair, and each side is handed the other's
+      public key.</li>
+
+      <li><strong>The two browsers agree on a key.</strong> Holding their own private key and
+      the other's public one, both work out the same shared secret — and that secret never
+      travels. From it they derive the key that will encrypt the secret. The derivation also
+      folds in the room and both public keys, so if anything in the middle had swapped a key,
+      the two sides would end up with different results.</li>
+
+      <li><strong>Four symbols, and a person to check them.</strong> Four bytes of that
+      derivation are not used as a key: they become the four symbols on both screens. Someone
+      sitting in the middle can only build two separate sessions, so the two screens would
+      disagree — which is why this is the one step we never let you skip. Once you both
+      confirm, the room is ready.</li>
+
+      <li><strong>The secret is encrypted where it is written.</strong> The browser holding it
+      encrypts it, and what reaches us is a block we have no key for. We check it is not
+      oversized and keep it in memory, attached to the room.</li>
+
+      <li><strong>Picked up once, then gone.</strong> The other browser collects it, and the
+      moment it leaves, the memory holding it is overwritten with zeroes and the room is
+      burned: the link stops working. If nobody ever collects it, the same happens by itself
+      when the room expires a couple of minutes later. The receiving browser then decrypts it
+      and shows it.</li>
+   </ol>
+
+   <h2>Up to 8 KB</h2>
+   <p>A password, a key, a PEM, a short config: that is what this is for. Anything larger is
+   refused, because a service that carries files is a different thing with different costs
+   and different abuse.</p>
+
+   <h2>What we guarantee</h2>
+   <ul>
+      <li>The readable secret never exists on the server, at any moment.</li>
+      <li>Nothing is written to disk: no database, no queue, no log of what you sent.</li>
+      <li>We do not hold the key and cannot work it out: we only ever see public keys.</li>
+      <li>The link carries no secret, so it is safe to paste in a chat.</li>
+   </ul>
+
+   <h2>What we cannot promise</h2>
+   <ul>
+      <li>A compromised server could serve modified JavaScript that leaks the key. This is true
+      of every end-to-end web app. The answer is to run your own copy.</li>
+      <li>The person receiving it can screenshot it or paste it anywhere.</li>
+      <li>The readable secret does sit in both browsers' memory while you use the page.</li>
+      <li>We see two IP addresses. Run your own copy and even those stay with you.</li>
+   </ul>
+
+   <h2>Why the words are in English</h2>
+   <p>The symbol is the real value; the word under it only gives the two of you one agreed
+   way to say it out loud. It stays in English for everyone, so that two people never end up
+   reading each other different words for the same picture.</p>
+
+   <h2>Comparing the symbols in a chat</h2>
+   <p>If what worries you is that Slack <em>keeps</em> things forever — the usual case —
+   comparing the symbols inside Slack is fine: the secret itself never goes there.</p>
+   <p>If what worries you is that someone is <em>inside</em> Slack reading, compare them
+   somewhere else: whoever can see the link can also stage the comparison.</p>
+
+   <h2>Why you should not simply trust us</h2>
+   <p>Every promise on this page is invisible from the outside. So the code is open, it is
+   small enough to read in an afternoon, and you can check for yourself that it never writes
+   anything down. If you would rather not take our word for it,
+   <a href="https://github.com/trikko/neverstored" target="_blank" rel="noopener">run your own instance</a>: it is one binary,
+   no database, no external service.</p>
+
+</main>
+<footer class="bottom"><a href="/cli">Need a CLI?</a> Open source. <a href="https://github.com/trikko/neverstored" target="_blank" rel="noopener">Run your own</a>.</footer>
+</div>
+</body>
+</html>

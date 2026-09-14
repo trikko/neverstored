@@ -1,0 +1,26 @@
+# TLS and the visitor's address; neverstored does the rest.
+#
+# Nothing is configured about the address on purpose. reverse_proxy already appends the peer
+# it accepted to X-Forwarded-For, and neverstored reads the last entry of that header, so
+# whatever the client put there first is harmless: the entry that decides is the one Caddy
+# wrote.
+#
+# Do not add `header_up X-Forwarded-For {remote_host}`. It looks tidier — one entry instead
+# of a list — and it is how this file used to read, until a deployment started refusing one
+# request in a couple of hundred. The placeholder resolves to nothing when the request
+# arrives as TLS early data on a resumed connection (Caddy marks those with an Early-Data
+# header), and header_up then overwrites a correct address with an empty string. Caddy's own
+# `caddy validate` warns that the directive is unnecessary, which it is.
+
+neverstored.example {
+	reverse_proxy localhost:8080
+}
+
+# If a CDN or load balancer terminates the connection before Caddy, tell Caddy whose word to
+# take for the client address:
+#
+#	{
+#		servers {
+#			trusted_proxies static 203.0.113.0/24
+#		}
+#	}
