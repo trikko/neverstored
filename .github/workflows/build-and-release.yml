@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - name: Checkout code
@@ -31,26 +31,10 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install openssl
 
-      - name: Install OpenSSL (Windows)
-        if: runner.os == 'Windows'
-        run: choco install openssl
-
       - name: Build CLI
         working-directory: ./cli
         run: dub build -b release --compiler=ldc2
 
-      - name: Bundle dependencies into Zip (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # Copy OpenSSL DLLs from Chocolatey installation directory
-          Copy-Item -Path "C:\Program Files\OpenSSL-Win64\bin\libcrypto*.dll" -Destination .\cli\
-          Copy-Item -Path "C:\Program Files\OpenSSL-Win64\bin\libssl*.dll" -Destination .\cli\
-          # Create a zip containing the executable and the DLLs
-          Compress-Archive -Path .\cli\neverstored.exe, .\cli\*.dll -DestinationPath .\cli\neverstored-windows.zip
-          # Remove original files so only the zip is uploaded
-          Remove-Item .\cli\neverstored.exe
-          Remove-Item .\cli\*.dll
 
       - name: Rename OS-specific binaries (Linux/macOS)
         if: runner.os != 'Windows'
