@@ -334,6 +334,56 @@ def main():
         for extra in quiet:
             extra.close()
 
+        print("\nicons and the preview card")
+        for path, kind in [("/icon.svg", "image/svg+xml"), ("/favicon.ico", "image/png"),
+                           ("/favicon.png", "image/png"), ("/apple-touch-icon.png", "image/png"),
+                           ("/social.png", "image/png")]:
+            status, headers, body = get(port, path)
+            check("%s is served as %s" % (path, kind),
+                  status == 200 and headers.get("content-type", "").startswith(kind) and body,
+                  "%s %s" % (status, headers.get("content-type")))
+
+        status, _, body = get(port, "/social.png")
+        check("the card is a real PNG of the declared size",
+              body[:8] == b"\x89PNG\r\n\x1a\n"
+              and int.from_bytes(body[16:20], "big") == 1200
+              and int.from_bytes(body[20:24], "big") == 630, str(body[:24]))
+
+        # A preview is fetched by a machine that will not resolve a relative image.
+        page = get(port, "/")[2].decode()
+        check("the preview image is an absolute url on the host that was asked",
+              ('content="https://127.0.0.1:%d/social.png"' % port) in page,
+              page[page.find("og:image") - 40:page.find("og:image") + 80])
+        check("and every page declares the icon", "/icon.svg" in page)
+
+        request = urllib.request.Request("http://127.0.0.1:%d/" % port, headers={
+            "x-forwarded-for": VISITOR, "x-forwarded-proto": "http"})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            plain = response.read().decode()
+        check("and follows the scheme the proxy reports",
+              ('content="http://127.0.0.1:%d/social.png"' % port) in plain)
+
+        # The host travels from the request into a meta tag, so it is attacker-controlled text.
+        raw = socket.create_connection(("127.0.0.1", port), timeout=5)
+        raw.sendall(b'GET / HTTP/1.1\r\nHost: evil"><script>x</script>\r\n'
+                    b"X-Forwarded-For: 198.51.100.7\r\nConnection: close\r\n\r\n")
+        crafted = b""
+        while True:
+            chunk = raw.recv(65536)
+            if not chunk:
+                break
+            crafted += chunk
+        raw.close()
+        check("a host with markup in it never reaches the page",
+              b"evil" not in crafted and b"<script>x</script>" not in crafted,
+              crafted[:80].decode(errors="replace"))
+        check("and the preview falls back to a relative image rather than a forged one",
+              b'property="og:image" content="/social.png"' in crafted)
+
+        room_page = get(port, "/r/" + "A" * 22)[2].decode()
+        check("a room page keeps its id out of the preview",
+              "A" * 22 not in room_page.split("<body")[0])
+
         print("\nhow long the room has")
         key = base64.b64encode(b"A" * 65).decode()
         _, made = call(port, "create", {"flow": "send", "pub": key})

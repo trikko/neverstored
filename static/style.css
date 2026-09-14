@@ -59,11 +59,9 @@ body {
 }
 
 .mark {
-   width: 17px;
-   height: 17px;
-   border-radius: 5px;
-   background: linear-gradient(150deg, var(--accent), #7b5cff);
-   box-shadow: inset 0 0 0 3px var(--panel);
+   width: 19px;
+   height: 19px;
+   background: url("/icon.svg") center / contain no-repeat;
 }
 
 .quiet { color: var(--dim); font-size: 15px; text-decoration: none; }

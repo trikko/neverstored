@@ -4,7 +4,7 @@ import neverstored.api;
 import neverstored.broker : startBroker;
 import neverstored.client : useBroker;
 import neverstored.rnd : isRoomId;
-import neverstored.visitor : misconfigured;
+import neverstored.visitor : misconfigured, noProxy;
 
 import serverino;
 
@@ -82,7 +82,7 @@ Fallthrough proxyCheck(Request request, Output output)
    complain(request);
 
    output.status = 503;
-   page(output, import("misconfigured.html"));
+   page(request, output, import("misconfigured.html"));
    return Fallthrough.No;
 }
 
@@ -104,9 +104,9 @@ private void complain(Request request)
       "; headers seen: ", request.header.data.keys.sort.join(" "));
 }
 
-@endpoint @route!"/" void home(Output output) { page(output, import("app.html")); }
-@endpoint @route!"/how-it-works" void how(Output output) { page(output, import("how.html")); }
-@endpoint @route!"/cli" void cli(Output output) { page(output, import("cli.html")); }
+@endpoint @route!"/" void home(Request request, Output output) { page(request, output, import("app.html")); }
+@endpoint @route!"/how-it-works" void how(Request request, Output output) { page(request, output, import("how.html")); }
+@endpoint @route!"/cli" void cli(Request request, Output output) { page(request, output, import("cli.html")); }
 
 @endpoint @route!(r => r.path.length > 3 && r.path[0 .. 3] == "/r/")
 void room(Request request, Output output)
@@ -114,11 +114,11 @@ void room(Request request, Output output)
    if (!isRoomId(request.path[3 .. $]))
    {
       output.status = 404;
-      page(output, import("gone.html"));
+      page(request, output, import("gone.html"));
       return;
    }
 
-   page(output, import("app.html"));
+   page(request, output, import("app.html"));
 }
 
 @endpoint @route!"/app.js" void appScript(Output output) { asset(output, "application/javascript", import("app.js")); }
@@ -126,18 +126,57 @@ void room(Request request, Output output)
 @endpoint @route!"/crypto.js" void cryptoScript(Output output) { asset(output, "application/javascript", import("crypto.js")); }
 @endpoint @route!"/qr.js" void qrScript(Output output) { asset(output, "application/javascript", import("qr.js")); }
 @endpoint @route!"/style.css" void styles(Output output) { asset(output, "text/css", import("style.css")); }
+@endpoint @route!"/icon.svg" void icon(Output output) { asset(output, "image/svg+xml", import("icon.svg")); }
+@endpoint @route!"/favicon.png" void faviconPng(Output output) { binary(output, "image/png", import("favicon.png")); }
+@endpoint @route!"/favicon.ico" void faviconIco(Output output) { binary(output, "image/png", import("favicon.png")); }
+@endpoint @route!"/apple-touch-icon.png" void appleIcon(Output output) { binary(output, "image/png", import("apple-touch-icon.png")); }
+@endpoint @route!"/social.png" void social(Output output) { binary(output, "image/png", import("social.png")); }
 
 @endpoint @priority(-100)
-void notFound(Output output)
+void notFound(Request request, Output output)
 {
    output.status = 404;
-   page(output, import("gone.html"));
+   page(request, output, import("gone.html"));
 }
 
-private void page(Output output, string body_)
+/+ Pages carry their own absolute address.
+
+ + A social preview is fetched by a machine that will not resolve a relative og:image, and the
+ + server has no configured name of its own: the only thing that knows what this instance is
+ + called is the request. So the name travels from the proxy into the page, once per request.
++/
+private void page(Request request, Output output, string body_)
 {
+   import std.array : replace;
+
    output.addHeader("content-type", "text/html; charset=utf-8");
    output.addHeader("cache-control", "no-store");
+   output ~= body_.replace("{{origin}}", origin(request));
+}
+
+private string origin(Request request)
+{
+   immutable host = request.header.read("host");
+   if (host.length == 0 || host.length > 253) return "";
+
+   foreach (c; host)
+      if (c <= ' ' || c == '/' || c == '\\' || c == '"' || c == '\'' || c >= 0x7f) return "";
+
+   // The proxy says so; with no proxy at all there is no certificate either.
+   immutable claimed = request.header.read("x-forwarded-proto");
+   immutable proto = claimed.length ? (claimed == "http" ? "http" : "https")
+      : (noProxy() ? "http" : "https");
+
+   return proto ~ "://" ~ host;
+}
+
+/+ Icons and the preview card change only when the binary does, and the binary is the only
+ + thing deployed, so they may be cached hard. Nothing here is derived from a secret.
++/
+private void binary(Output output, string type, string body_)
+{
+   output.addHeader("content-type", type);
+   output.addHeader("cache-control", "public, max-age=604800");
    output ~= body_;
 }
 
