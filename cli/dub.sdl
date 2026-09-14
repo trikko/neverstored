@@ -1,7 +1,7 @@
 name "neverstored-cli"
 description "Hand a secret over from the terminal."
 authors "Andrea Fontana"
-license "AGPL-3.0-or-later"
+license "MIT"
 targetType "executable"
 targetName "neverstored"
 mainSourceFile "source/app.d"

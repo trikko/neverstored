@@ -1,7 +1,7 @@
 name "neverstored"
 description "Hand a secret to someone while you are both there. Nothing is ever stored."
 authors "Andrea Fontana"
-license "AGPL-3.0-or-later"
+license "MIT"
 targetType "executable"
 mainSourceFile "source/app.d"
 stringImportPaths "static"

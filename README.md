@@ -135,4 +135,4 @@ browser derive the same four symbols and open each other's payloads — and, und
 that nothing is ever opened for writing while a secret passes through, neither on the
 server nor in the client.
 
-Built with [serverino](https://serverino.dev).
+Built with [serverino](https://serverino.dev). MIT licensed.
