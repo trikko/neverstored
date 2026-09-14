@@ -1,0 +1,93 @@
+name: Build and Release CLI
+
+on:
+  push:
+    branches:
+      - main # Build and publish on every commit to the main branch
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup D compiler
+        uses: dlang-community/setup-dlang@v2.0.0
+        with:
+          compiler: ldc-latest
+
+      - name: Install OpenSSL (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+
+      - name: Install OpenSSL (macOS)
+        if: runner.os == 'macOS'
+        run: brew install openssl
+
+      - name: Install OpenSSL (Windows)
+        if: runner.os == 'Windows'
+        run: choco install openssl
+
+      - name: Build CLI
+        working-directory: ./cli
+        run: dub build -b release --compiler=ldc2
+
+      - name: Bundle dependencies into Zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Copy OpenSSL DLLs from Chocolatey installation directory
+          Copy-Item -Path "C:\Program Files\OpenSSL-Win64\bin\libcrypto*.dll" -Destination .\cli\
+          Copy-Item -Path "C:\Program Files\OpenSSL-Win64\bin\libssl*.dll" -Destination .\cli\
+          # Create a zip containing the executable and the DLLs
+          Compress-Archive -Path .\cli\neverstored.exe, .\cli\*.dll -DestinationPath .\cli\neverstored-windows.zip
+          # Remove original files so only the zip is uploaded
+          Remove-Item .\cli\neverstored.exe
+          Remove-Item .\cli\*.dll
+
+      - name: Rename OS-specific binaries (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            mv cli/neverstored cli/neverstored-macos
+          else
+            mv cli/neverstored cli/neverstored-linux
+          fi
+
+      - name: Upload Temporary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.os }}
+          path: cli/neverstored-*
+          retention-days: 1
+
+  # This job takes the artifacts and uploads them to a GitHub Release
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to overwrite the release
+    steps:
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: binaries
+          merge-multiple: true
+
+      - name: Publish to Continuous Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Latest Commit Build"
+          body: "Binaries automatically generated from the latest commit. Overwritten on every push."
+          files: binaries/*
+          prerelease: true
+          make_latest: true
