@@ -107,6 +107,7 @@ private void complain(Request request)
 @endpoint @route!"/" void home(Request request, Output output) { page(request, output, import("app.html")); }
 @endpoint @route!"/how-it-works" void how(Request request, Output output) { page(request, output, import("how.html")); }
 @endpoint @route!"/cli" void cli(Request request, Output output) { page(request, output, import("cli.html")); }
+@endpoint @route!"/privacy" void privacyPolicy(Request request, Output output) { page(request, output, import("privacy.html")); }
 
 @endpoint @route!(r => r.path.length > 3 && r.path[0 .. 3] == "/r/")
 void room(Request request, Output output)

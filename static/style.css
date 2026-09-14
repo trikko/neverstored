@@ -526,7 +526,7 @@ pre#secret {
 
 .expiry.soon { color: var(--warn); }
 
-.bottom > a { margin-right: 10px; }
+
 .bottom a { color: var(--accent); }
 .claim { margin: 6px 0 0; color: var(--dim); }
 
