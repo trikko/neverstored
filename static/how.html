@@ -87,6 +87,9 @@
    <ul>
       <li>A compromised server could serve modified JavaScript that leaks the key. This is true
       of every end-to-end web app. The answer is to run your own copy.</li>
+      <li>Your browser is inside the circle, not outside it. An extension that can read the page,
+      or a computer somebody else controls, sees the secret exactly as you do — nothing this page
+      encrypts can help with that. <a href="/cli">The terminal client</a> has no extensions.</li>
       <li>The person receiving it can screenshot it or paste it anywhere.</li>
       <li>The readable secret does sit in both browsers' memory while you use the page.</li>
       <li>We see two IP addresses. Run your own copy and even those stay with you.</li>

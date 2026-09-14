@@ -58,6 +58,11 @@ Not guaranteed, and worth knowing:
 
 - a compromised server could serve modified JavaScript that leaks the key. This is true of
   every end-to-end web app. The answer is to run your own;
+- the browser is inside the trust boundary, not outside it. An extension with access to the
+  page, or a machine somebody else controls, reads the secret exactly as the person reading
+  it does, and no amount of cryptography in the page can prevent that. The terminal client
+  exists partly for this: it has no extensions, and what it depends on is the two libraries
+  it links;
 - the recipient can screenshot or paste it elsewhere;
 - the readable secret does live in both browsers' memory while the page is open;
 - the server sees two IP addresses. It keeps neither: the one that opened the room is counted
@@ -115,7 +120,8 @@ is read from a file, from stdin, or typed without echo — never from an argumen
 would put it in the process list. What arrives goes to stdout and nothing else does. The
 symbols are always confirmed by a person: there is no flag to skip that.
 
-Point it at an instance with `NEVERSTORED_URL`, which defaults to `http://localhost:8080`.
+It talks to `https://neverstored.com` unless `NEVERSTORED_URL` or `--url` says otherwise,
+so pointing it at your own instance is one variable.
 The client needs libcrypto and libcurl; the server still needs nothing. See `/cli` on a
 running instance for the full usage.
 

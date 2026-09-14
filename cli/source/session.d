@@ -28,7 +28,7 @@ enum Exit
 
 struct Options
 {
-   string url = "http://localhost:8080";
+   string url = "https://neverstored.com";
    string file;
    bool qr = true;
    bool dense;
@@ -415,4 +415,11 @@ bool interrupted() { return interruptedFlag; }
 extern (C) void onInterrupt(int) nothrow @nogc
 {
    interruptedFlag = true;
+}
+
+unittest // the client is useful before it is configured
+{
+   Options fresh;
+   assert(fresh.url == "https://neverstored.com",
+      "the default instance moved: the page at /cli and the README say where it points");
 }

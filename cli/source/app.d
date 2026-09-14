@@ -17,7 +17,7 @@ terminal without echoing. What you receive goes to stdout and nothing else does,
 `neverstored open <link> > key.txt` does what it looks like.
 
   --file F     read the secret from a file, or from stdin with -
-  --url U      the service to use (default $NEVERSTORED_URL or http://localhost:8080)
+  --url U      the service to use (default $NEVERSTORED_URL or https://neverstored.com)
   --wait N     give up after N seconds waiting for the other side
   --no-qr      do not draw the code to scan
   --dense      draw the code half as tall
