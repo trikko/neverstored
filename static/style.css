@@ -547,20 +547,40 @@ pre#secret {
 
 @media (prefers-color-scheme: dark) {
    :root {
-      --ink: #f2f4f8;
-      --body: #b9bfcc;
-      --dim: #878e9d;
-      --line: #2a2e38;
-      --panel: #171a21;
-      --bg: #0e1015;
-      --accent: #6d8bff;
-      --accent-ink: #0b0e16;
+      --ink: #ffffff;
+      --body: #e2e8f0;
+      --dim: #94a3b8;
+      --line: #475569;
+      --panel: #1e293b;
+      --bg: #0f172a;
+      --accent: #818cf8;
+      --accent-ink: #0f172a;
       --good: #4ade80;
-      --warn: #ff9c8f;
-      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
+      --warn: #f87171;
+      --shadow: 0 4px 6px rgba(0, 0, 0, 0.5), 0 15px 30px -10px rgba(0, 0, 0, 0.8);
    }
 
-   .primary:hover { background: #8aa1ff; }
-   .pick:hover { background: rgba(109, 139, 255, 0.08); }
+   button {
+      background: #334155;
+      border-color: #64748b;
+   }
+   
+   button:hover { 
+      border-color: #cbd5e1;
+      background: #475569; 
+   }
+
+   .primary, a.primary { 
+      background: var(--accent); 
+      border-color: var(--accent); 
+      color: var(--accent-ink); 
+   }
+   
+   .primary:hover, a.primary:hover { 
+      background: #a5b4fc; 
+      border-color: #a5b4fc; 
+   }
+
+   .pick:hover { background: rgba(129, 140, 248, 0.15); }
    #qr { background: #fff; }
 }
