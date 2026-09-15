@@ -9,3 +9,6 @@ dub.selections.json
 
 # Internal, not published
 /CLAUDE.md
+
+# Operator-specific configuration — copy operator.ini.example to operator.ini and edit it
+/static/operator.ini

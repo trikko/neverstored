@@ -1,0 +1,4 @@
+Contact: mailto:{{contact}}
+Preferred-Languages: en, it
+Canonical: {{origin}}/.well-known/security.txt
+Expires: {{expires}}

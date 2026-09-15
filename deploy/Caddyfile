@@ -13,6 +13,7 @@
 # `caddy validate` warns that the directive is unnecessary, which it is.
 
 neverstored.example {
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 	reverse_proxy localhost:8080
 }
 

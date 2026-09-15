@@ -1,0 +1,13 @@
+# These values are compiled into the binary. Edit them to match your instance
+# before building, then rebuild and restart.
+#
+# If you leave the defaults, the server still works: contact pages will show
+# placeholder values instead of your real details.
+
+name    = Example Operator
+contact = security@example.com
+privacy = privacy@example.com
+
+# Optional: override the Expires date in security.txt (ISO 8601).
+# If omitted, defaults to January 1 of the year after the build year.
+# expires = 2027-06-01T00:00:00.000Z

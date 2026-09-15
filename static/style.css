@@ -491,6 +491,8 @@ pre#secret {
 .prose p, .prose li { color: var(--body); }
 .prose ul { padding-left: 20px; }
 .prose li { margin-bottom: 7px; }
+.prose hr { border: none; border-top: 1px solid var(--line); margin: 40px 0; }
+.prose .lang-label { display: block; font-size: 12px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); margin-bottom: 20px; }
 
 .walk { margin: 0; padding-left: 22px; }
 .walk li { margin-bottom: 14px; line-height: 1.6; }

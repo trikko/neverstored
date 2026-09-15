@@ -27,29 +27,71 @@
 </header>
 
 <main class="card prose">
-   <h1>Privacy</h1>
-   <p><em>Last updated: September 14, 2026</em></p>
-   
+   <section lang="en">
+   <span class="lang-label">English</span>
+   <h2>Privacy</h2>
+   <p><em>Last updated: September 15, 2026</em></p>
+
    <p>This service is designed to be as simple and respectful as possible: it does not install cookies, does not profile you, and does not track you across the web.</p>
 
    <h2>Cookies and tracking</h2>
    <p>The site does not install cookies, does not use statistical analysis tools (like Google Analytics), nor pixels or tracking technologies. There is no cookie banner because there is no need for one.</p>
 
-   <h2>Data you provide</h2>
-   <p>Secrets are encrypted in the browser and transmitted through the server to the recipient. The server only sees encrypted bytes and public keys. Nothing is written to disk: there is no database, no queue, and no storage. Everything is kept in memory and wiped immediately after it is transferred, or when the room expires.</p>
+   <h2>Data you provide and encryption</h2>
+   <p>All traffic between your browser and the server is encrypted in transit using standard HTTPS (TLS 1.2 / TLS 1.3).</p>
+   <p>Secrets are end-to-end encrypted in your browser using the WebCrypto API (ECDH P-256 for key agreement, HKDF-SHA256, and AES-256-GCM for encryption) before being transmitted to the recipient. Although encrypted content remains personal data under applicable regulation, the server acts solely as a relay: it receives only encrypted bytes and public keys, without holding the decryption key. Nothing is written to disk: there is no database, no queue, and no storage. Everything is kept in memory and wiped immediately after it is transferred, or when the room expires.</p>
 
    <h2>Data collected automatically</h2>
    <p>Like any web server, for technical and security reasons the server software records some data from each request in its logs (date and time, requested page, outcome). The IP address is recorded only in an anonymized form and logs are kept for a maximum of 14 days, then automatically deleted. They are not used to identify or profile you.</p>
    <p>The service also sees the IP addresses when an exchange happens to enforce rate limits. It keeps neither: the IP address that opened the room is counted in memory under a keyed hash. The key for this hash is made at startup, never leaves memory, and dies with the process.</p>
 
    <h2>Data Controller and contacts</h2>
-   <p>The Data Controller is Andrea Fontana. For any requests regarding this policy, you can write to the dedicated privacy mailbox: compose the address using the word <strong>privacy</strong>, followed by the at symbol (<strong>@</strong>), and finally the domain of this site (<strong>neverstored.com</strong>).</p>
+   <p>The Data Controller is {{operator_name}}. For any requests regarding this policy, you can write to: <strong>{{operator_privacy}}</strong>.</p>
+
+   <h2>Your rights</h2>
+   <p>Under the General Data Protection Regulation (GDPR, Articles 15–22), you have the right to access, rectify, erase, or restrict the processing of your personal data, as well as the right to data portability, the right to object to processing, and the right not to be subject to automated decision-making.</p>
+   <p>Because the service operates on a zero-knowledge, ephemeral model without user accounts, persistent storage, or identification logs (in accordance with Article 11 of the GDPR on processing which does not require identification), the server holds no readable personal data or linkable identities once a session is completed or expired.</p>
 
    <h2>Right to complain</h2>
-   <p>If you believe that your data is processed in violation of personal data protection rules, you have the right to lodge a complaint with the Data Protection Authority (e.g., via <a href="https://www.gdpr.it" target="_blank" rel="noopener">www.gdpr.it</a> in Italy).</p>
+   <p>If you believe that your data is processed in violation of personal data protection rules, you have the right to lodge a complaint with a supervisory Data Protection Authority (e.g., the Garante per la protezione dei dati personali via <a href="https://www.garanteprivacy.it" target="_blank" rel="noopener">www.garanteprivacy.it</a> or <a href="https://www.gdpr.it" target="_blank" rel="noopener">www.gdpr.it</a> in Italy).</p>
 
    <h2>Changes</h2>
    <p>If the site should change (for example, by adding tools that collect data), this policy will be updated accordingly, with the new date at the top of the page.</p>
+   </section>
+
+   <hr>
+
+   <section lang="it">
+   <span class="lang-label">Italiano</span>
+   <h2>Privacy</h2>
+   <p><em>Ultimo aggiornamento: 15 settembre 2026</em></p>
+
+   <p>Questo servizio è progettato per essere il più semplice e rispettoso possibile: non installa cookie, non ti profila e non ti traccia sul web.</p>
+
+   <h2>Cookie e tracciamento</h2>
+   <p>Il sito non installa cookie, non utilizza strumenti di analisi statistica (come Google Analytics), né pixel o tecnologie di tracciamento. Non è presente alcun banner sui cookie perché non ce n'è bisogno.</p>
+
+   <h2>Dati che fornisci e cifratura</h2>
+   <p>Tutto il traffico tra il tuo browser e il server è cifrato in transito tramite HTTPS standard (TLS 1.2 / TLS 1.3).</p>
+   <p>I segreti vengono cifrati end-to-end nel tuo browser tramite la WebCrypto API (ECDH P-256 per la negoziazione della chiave, HKDF-SHA256 e AES-256-GCM per la cifratura) prima di essere trasmessi al destinatario. Sebbene il contenuto cifrato rimanga un dato personale ai sensi della normativa applicabile, il server agisce esclusivamente come relay: riceve solo byte cifrati e chiavi pubbliche, senza detenere la chiave di decifratura. Nulla viene scritto su disco: non esiste database, coda o storage. Tutto viene mantenuto in memoria e cancellato immediatamente dopo il trasferimento, o alla scadenza della stanza.</p>
+
+   <h2>Dati raccolti automaticamente</h2>
+   <p>Come qualsiasi server web, per ragioni tecniche e di sicurezza il software server registra alcuni dati di ogni richiesta nei propri log (data e ora, pagina richiesta, esito). L'indirizzo IP viene registrato solo in forma anonimizzata e i log vengono conservati per un massimo di 14 giorni, poi eliminati automaticamente. Non vengono utilizzati per identificarti o profilarti.</p>
+   <p>Il servizio vede anche gli indirizzi IP quando avviene uno scambio, per applicare i limiti di frequenza. Non conserva né l'uno né gli altri: l'indirizzo IP che ha aperto la stanza viene conteggiato in memoria sotto un hash con chiave. La chiave di questo hash viene generata all'avvio, non lascia mai la memoria e scompare con il processo.</p>
+
+   <h2>Titolare del trattamento e contatti</h2>
+   <p>Il Titolare del trattamento è {{operator_name}}. Per qualsiasi richiesta relativa a questa policy puoi scrivere a: <strong>{{operator_privacy}}</strong>.</p>
+
+   <h2>I tuoi diritti</h2>
+   <p>Ai sensi del Regolamento Generale sulla Protezione dei Dati (GDPR, articoli 15–22), hai il diritto di accedere, rettificare, cancellare o limitare il trattamento dei tuoi dati personali, nonché il diritto alla portabilità dei dati, il diritto di opporti al trattamento e il diritto di non essere sottoposto a decisioni automatizzate.</p>
+   <p>Poiché il servizio opera secondo un modello zero-knowledge ed effimero, privo di account utente, archiviazione persistente o log di identificazione (in conformità all'articolo 11 del GDPR sul trattamento che non richiede identificazione), il server non detiene dati personali leggibili né identità collegabili una volta che una sessione è completata o scaduta.</p>
+
+   <h2>Diritto di reclamo</h2>
+   <p>Se ritieni che i tuoi dati siano trattati in violazione delle norme sulla protezione dei dati personali, hai il diritto di proporre reclamo a un'autorità di controllo (ad es. il Garante per la protezione dei dati personali tramite <a href="https://www.garanteprivacy.it" target="_blank" rel="noopener">www.garanteprivacy.it</a> o <a href="https://www.gdpr.it" target="_blank" rel="noopener">www.gdpr.it</a>).</p>
+
+   <h2>Modifiche</h2>
+   <p>Se il sito dovesse cambiare (ad esempio aggiungendo strumenti che raccolgono dati), questa policy verrà aggiornata di conseguenza, con la nuova data in cima alla pagina.</p>
+   </section>
 
 </main>
 <footer class="bottom">proudly open source &middot; <a href="https://github.com/trikko/neverstored" target="_blank" rel="noopener">run your own</a> &middot; <a href="/cli">cli</a> &middot; <a href="/privacy">privacy</a></footer>

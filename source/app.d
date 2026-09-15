@@ -12,6 +12,66 @@ import std.process : environment;
 
 mixin ServerinoMain!(neverstored.api);
 
+static assert(__traits(compiles, import("operator.ini")),
+   "static/operator.ini not found. "
+   ~ "Copy static/operator.ini.example to static/operator.ini and fill in your details before building.");
+
+private immutable string OPERATOR_NAME;
+private immutable string OPERATOR_CONTACT;
+private immutable string OPERATOR_PRIVACY;
+private immutable string OPERATOR_EXPIRES;
+
+shared static this()
+{
+   enum cfg = parseOperatorIni(import("operator.ini"));
+   OPERATOR_NAME    = cfg.name;
+   OPERATOR_CONTACT = cfg.contact;
+   OPERATOR_PRIVACY = cfg.privacy;
+   OPERATOR_EXPIRES = cfg.expires;
+}
+
+private struct OperatorConfig
+{
+   string name    = "Example Operator";
+   string contact = "security@example.com";
+   string privacy = "privacy@example.com";
+   string expires = defaultExpires();
+}
+
+// __DATE__ is "MMM DD YYYY", e.g. "Sep 15 2026"; bump the year by one.
+private string defaultExpires() pure
+{
+   import std.conv : to;
+   return (__DATE__[$ - 4 .. $].to!int + 1).to!string ~ "-01-01T00:00:00.000Z";
+}
+
+private OperatorConfig parseOperatorIni(string src) pure
+{
+   import std.string : lineSplitter, strip;
+   import std.algorithm : findSplit;
+
+   OperatorConfig cfg;
+   foreach (line; src.lineSplitter)
+   {
+      auto s = line.strip;
+      if (s.length == 0 || s[0] == '#') continue;
+      if (auto parts = s.findSplit("="))
+      {
+         immutable key = parts[0].strip;
+         immutable val = parts[2].strip;
+         switch (key)
+         {
+            case "name":    cfg.name    = val; break;
+            case "contact": cfg.contact = val; break;
+            case "privacy": cfg.privacy = val; break;
+            case "expires": cfg.expires = val; break;
+            default: break;
+         }
+      }
+   }
+   return cfg;
+}
+
 string brokerSocketPath()
 {
    import std.path : buildPath;
@@ -133,6 +193,25 @@ void room(Request request, Output output)
 @endpoint @route!"/apple-touch-icon.png" void appleIcon(Output output) { binary(output, "image/png", import("apple-touch-icon.png")); }
 @endpoint @route!"/social.png" void social(Output output) { binary(output, "image/png", import("social.png")); }
 
+@endpoint @route!"/.well-known/security.txt"
+void securityTxt(Request request, Output output)
+{
+   import std.array : replace;
+   output.addHeader("content-type", "text/plain; charset=utf-8");
+   output.addHeader("cache-control", "no-store");
+   output ~= import("security.txt")
+      .replace("{{contact}}", OPERATOR_CONTACT)
+      .replace("{{expires}}", OPERATOR_EXPIRES)
+      .replace("{{origin}}", origin(request));
+}
+
+@endpoint @route!"/security.txt"
+void securityTxtAlias(Request request, Output output)
+{
+   output.status = 301;
+   output.addHeader("location", "/.well-known/security.txt");
+}
+
 @endpoint @priority(-100)
 void notFound(Request request, Output output)
 {
@@ -152,7 +231,10 @@ private void page(Request request, Output output, string body_)
 
    output.addHeader("content-type", "text/html; charset=utf-8");
    output.addHeader("cache-control", "no-store");
-   output ~= body_.replace("{{origin}}", origin(request));
+   output ~= body_
+      .replace("{{origin}}", origin(request))
+      .replace("{{operator_name}}", OPERATOR_NAME)
+      .replace("{{operator_privacy}}", OPERATOR_PRIVACY);
 }
 
 private string origin(Request request)
