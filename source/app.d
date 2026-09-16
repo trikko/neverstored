@@ -155,13 +155,13 @@ Fallthrough proxyCheck(Request request, Output output)
 +/
 private void complain(Request request)
 {
-   import std.algorithm : sort;
-   import std.array : join;
+   import std.algorithm : sort, map;
+   import std.array : join, array;
    import std.experimental.logger : warning;
 
    warning("refusing ", request.path, ": x-forwarded-for is ",
       request.header.has("x-forwarded-for") ? "present but blank" : "absent",
-      "; headers seen: ", request.header.data.keys.sort.join(" "));
+      "; headers seen: ", request.header.data.map!(x => cast(string)x.key).array.sort.join(" "));
 }
 
 @endpoint @route!"/" void home(Request request, Output output) { page(request, output, import("app.html")); }

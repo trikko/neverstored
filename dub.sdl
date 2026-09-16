@@ -5,7 +5,7 @@ license "MIT"
 targetType "executable"
 mainSourceFile "source/app.d"
 stringImportPaths "static"
-dependency "serverino" version="~>0.8"
+dependency "serverino" version="~>0.8.1"
 
 buildType "small" {
 	buildOptions "releaseMode" "optimize"
