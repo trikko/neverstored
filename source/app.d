@@ -219,7 +219,7 @@ void robotsTxt(Request request, Output output)
 {
    import std.array : replace;
    output.addHeader("content-type", "text/plain; charset=utf-8");
-   output.addHeader("cache-control", "no-store");
+   output.addHeader("cache-control", "public, max-age=86400");
    output ~= import("robots.txt").replace("{{origin}}", origin(request));
 }
 
@@ -228,7 +228,7 @@ void sitemapXml(Request request, Output output)
 {
    import std.array : replace;
    output.addHeader("content-type", "application/xml; charset=utf-8");
-   output.addHeader("cache-control", "no-store");
+   output.addHeader("cache-control", "public, max-age=86400");
    output ~= import("sitemap.xml").replace("{{origin}}", origin(request));
 }
 
