@@ -3,6 +3,8 @@ const FAST_POLL = 500;
 const SLOW_POLL = 3000;
 
 const state = {
+   poll: 0,
+   trouble: 0,
    room: null,
    token: null,
    role: null,
@@ -168,16 +170,45 @@ function drawSymbols() {
    };
 }
 
+/// The tab title is the whole notice. A real notification would need permission we would
+/// have to ask for while the code is on screen, and on Android it cannot be raised at all
+/// without a service worker — which is not a thing to install on a site that keeps nothing.
 function alertPeerArrived() {
    document.title = "Someone is here — neverstored";
-   if (window.Notification && Notification.permission === "granted")
-      new Notification("They opened your link", { body: "Check the symbols match." });
+}
+
+/// One place schedules the next poll, and it cancels the pending one first: two chains
+/// running at once would poll each other's versions away.
+function schedule(delay) {
+   clearTimeout(state.poll);
+   state.poll = setTimeout(tick, delay);
 }
 
 async function tick() {
    if (state.finished) return;
 
+   try {
+      await poll();
+   } catch (error) {
+      // The exchange is minutes long and lives on phones: a lost request, a tunnel, a
+      // moment of sleep. Whatever went wrong, the one thing that must not happen is the
+      // loop ending, because only a poll can move the page — the room would expire with
+      // nobody watching, in front of a screen that never changed.
+      state.trouble++;
+      if (state.trouble >= 3) say("Trouble reaching the server. Still trying.");
+      schedule(SLOW_POLL);
+   }
+}
+
+async function poll() {
    const reply = await post("poll", { v: state.version });
+
+   // A poll that goes through takes the complaint off the screen, even when it carries
+   // no news: render() puts back whatever the page was saying before.
+   if (state.trouble) {
+      state.trouble = 0;
+      render();
+   }
 
    if (!reply.ok) {
       if (reply.err === "notfound") {
@@ -192,7 +223,7 @@ async function tick() {
          }
          return finish("gone")("This room is gone. Nothing was left behind.");
       }
-      return setTimeout(tick, SLOW_POLL);
+      return schedule(SLOW_POLL);
    }
 
    // Every reply carries it, changed or not, so the countdown is corrected on each poll
@@ -205,7 +236,7 @@ async function tick() {
    if (reply.changed) await apply(reply);
 
    const idle = !state.peerSeen;
-   setTimeout(tick, idle ? SLOW_POLL : FAST_POLL);
+   schedule(idle ? SLOW_POLL : FAST_POLL);
 }
 
 async function apply(reply) {
@@ -382,8 +413,6 @@ async function createRoom(flow, secret) {
    };
 
    $("qr").hidden = !drawQr($("qr"), link);
-
-   if (window.Notification && Notification.permission === "default") Notification.requestPermission();
 
    state.last = { state: "created", ver: 0, role: state.role };
    render();

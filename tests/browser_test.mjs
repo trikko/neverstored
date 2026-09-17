@@ -548,6 +548,46 @@ async function main() {
          askerEnding.includes("the shared link leads nowhere")
          && !askerEnding.includes("this link"), askerEnding);
 
+      console.log("\n  a poll that goes wrong");
+
+      const startRoom = async (tab) => {
+         await waitFor(() => tab.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the app");
+         await tab.eval("document.getElementById('pickSend').click()");
+         await tab.eval(`document.getElementById('secret-input').value = ${JSON.stringify(SECRET)};
+            document.getElementById('compose').dispatchEvent(new Event('submit', { cancelable: true }))`);
+         return waitFor(() => tab.eval("document.getElementById('link').value || null"), "the link");
+      };
+
+      const symbolsOnScreen = (tab) => tab.eval(
+         "(() => { if (document.querySelector('[data-view=verify]').hidden) return null;"
+         + " const s = document.querySelectorAll('#symbols span em');"
+         + " return s.length ? [...s].map(n => n.textContent).join(' ') : null; })()");
+
+      const dropped = await openTab(base + "/");
+      const droppedLink = await startRoom(dropped);
+      await dropped.eval(
+         "(() => { const real = window.fetch; let drop = 1;"
+         + " window.fetch = (url, opts) => (drop && String(url).includes('/api/poll'))"
+         + "    ? (drop--, Promise.reject(new TypeError('Failed to fetch')))"
+         + "    : real(url, opts); return true; })()");
+      await openTab(droppedLink);
+      const afterDrop = await waitFor(() => symbolsOnScreen(dropped), "the sender past a lost request");
+      check("a request that never lands does not end the exchange", typeof afterDrop === "string", String(afterDrop));
+
+      // What Chrome on Android actually did, in the one step only the room's creator runs.
+      // It throws after everything apply() guards against repeating, so nothing but the
+      // change coming round again can rescue the page.
+      const thrown = await openTab(base + "/");
+      const thrownLink = await startRoom(thrown);
+      await thrown.eval(
+         "(() => { const real = window.alertPeerArrived; let boom = 1;"
+         + " window.alertPeerArrived = () => { if (boom) { boom--; throw new TypeError('Illegal constructor'); }"
+         + "    return real(); }; return true; })()");
+      await openTab(thrownLink);
+      const afterThrow = await waitFor(() => symbolsOnScreen(thrown), "the sender past a throw mid-change");
+      check("a throw while applying a change does not end it either",
+         typeof afterThrow === "string", String(afterThrow));
+
       console.log("\n  a room that runs out of time");
 
       const owner = await openTab(base + "/");
