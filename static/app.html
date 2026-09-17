@@ -165,6 +165,29 @@
       <a class="primary" href="/">Send another secret</a>
    </section>
 
+   <section data-view="insecure" hidden>
+      <p class="verdict">Not over https</p>
+      <p class="note warn">Your browser only allows encryption over https or on localhost,
+      so this page cannot do its half of the work here. Open it over https, or from the
+      machine it runs on.</p>
+   </section>
+
+   <section data-view="occupied" hidden>
+      <p class="verdict">Room is full</p>
+      <p class="hint">Two people are already in this room, and a room only ever holds two.
+      If one of them is you, in another tab or on another device, carry on there: an
+      exchange can only continue where it started.</p>
+      <a class="primary" href="/">Start an exchange</a>
+   </section>
+
+   <section data-view="expired" hidden>
+      <p class="verdict">This room expired</p>
+      <p class="hint">It reached its deadline before the secret was handed over, so it was
+      wiped: the keys, the id and anything still in flight are gone from our memory, and none
+      of them ever touched a disk. Nothing was delivered, and the link leads nowhere now.</p>
+      <a id="expiredAgain" class="primary" href="/" hidden>Start another exchange</a>
+   </section>
+
    <section data-view="gone" hidden>
       <p class="verdict">Nothing here</p>
       <p class="hint">This link leads nowhere. It may have been used already, or it may never

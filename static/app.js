@@ -80,7 +80,7 @@ const show = (...ids) => {
 
    // Before a direction is chosen, and once the room is gone, there is no path to show —
    // and nothing for the status line to narrate either.
-   const onAPath = !ids.includes("chooser") && !ids.includes("gone");
+   const onAPath = !ids.some(id => ["chooser", "gone", "expired", "occupied", "insecure"].includes(id));
    $("steps").hidden = !onAPath;
    $("where").hidden = !onAPath;
    $("status").hidden = ids.includes("chooser");
@@ -180,8 +180,18 @@ async function tick() {
    const reply = await post("poll", { v: state.version });
 
    if (!reply.ok) {
-      if (reply.err === "notfound")
+      if (reply.err === "notfound") {
+         // The room dies the same way for everyone on the server, and a stranger opening the
+         // link cannot be told why. Whoever was inside it watched the countdown run out, so
+         // telling them we cannot tell the difference would be a lie they just disproved.
+         // Only whoever opened the room is offered another one: the other side arrived
+         // through a link and has nothing to start again.
+         if (state.expiresAt && Date.now() >= state.expiresAt) {
+            $("expiredAgain").hidden = !state.owner;
+            return finish("expired")("This room expired before the secret was handed over.");
+         }
          return finish("gone")("This room is gone. Nothing was left behind.");
+      }
       return setTimeout(tick, SLOW_POLL);
    }
 
@@ -394,10 +404,16 @@ async function joinRoom(id) {
    const reply = await response.json();
 
    if (!reply.ok) {
+      // A full room is not a missing one: saying the link leads nowhere would be a lie the
+      // two people inside could disprove.
+      if (reply.err === "occupied") {
+         show("occupied");
+         say("Two people are already in this room.");
+         return;
+      }
+
       show("gone");
-      say(reply.err === "occupied"
-         ? "Two people are already in this room."
-         : "This link leads nowhere. Nothing was left behind.");
+      say("This link leads nowhere. Nothing was left behind.");
       return;
    }
 
@@ -416,13 +432,8 @@ function wire() {
    // Browsers only expose WebCrypto in a secure context, so plain http on a LAN address
    // leaves the page unable to do anything. Say so instead of failing silently.
    if (!window.isSecureContext || !window.crypto?.subtle) {
-      show("gone");
+      show("insecure");
       say("This page needs a secure connection.");
-      $("status").after(Object.assign(document.createElement("p"), {
-         className: "note warn",
-         textContent: "Your browser only allows encryption over https or on localhost. "
-            + "Open this over https, or from the machine it runs on.",
-      }));
       return;
    }
 

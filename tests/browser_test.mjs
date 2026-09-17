@@ -228,6 +228,18 @@ async function main() {
          "document.title.includes('Someone is here') || null"), "the arrival notice");
       check("whoever was waiting is told someone arrived", waitingWasTold === true);
 
+      // A full room is the one case where the page knows perfectly well what is going on,
+      // so it must not fall back on the "we cannot tell the difference" screen.
+      const third = await openTab(link);
+      await waitFor(() => third.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the room page");
+      const crowded = await waitFor(() => third.eval(
+         "(() => { const s = document.querySelector('[data-view=occupied]');"
+         + " return s && !s.hidden ? (document.getElementById('status').textContent + ' ' "
+         + " + s.textContent).replace(/\\s+/g, ' ') : null; })()"), "the full-room screen");
+      check("a third arrival is told the room is full", /already in this room/.test(crowded), crowded.trim());
+      check("and is not told the link leads nowhere",
+         !/leads nowhere|never existed|Nothing here/.test(crowded), crowded.trim());
+
       const openerWasNotTold = await receiver.eval("document.title");
       check("whoever opened the link is not told what they just did",
          !openerWasNotTold.includes("Someone is here"), openerWasNotTold);
@@ -400,6 +412,22 @@ async function main() {
       const stillInPage = await receiver.eval("JSON.stringify(state).includes(" + JSON.stringify(SECRET) + ")");
       check("the app keeps no copy of the secret in its state", stillInPage === false);
 
+      // Over plain http on a LAN address WebCrypto is missing, and the page knows exactly
+      // why — so it must not offer the screen it shows for a room it cannot account for.
+      const insecure = await openTab(base + "/");
+      await waitFor(() => insecure.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the app");
+      const refusal = await insecure.eval(
+         "(() => { Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });"
+         + " wire();"
+         + " const s = document.querySelector('[data-view=insecure]');"
+         + " return s.hidden ? null : (document.getElementById('status').textContent + ' '"
+         + " + s.textContent).replace(/\\s+/g, ' '); })()");
+      check("without a secure context the page says so", /secure connection/.test(String(refusal)), String(refusal).trim());
+      check("and does not pretend the link leads nowhere",
+         refusal !== null && !/leads nowhere|never existed|Nothing here/.test(refusal), String(refusal).trim());
+      const noPathThere = await insecure.eval("document.getElementById('steps').hidden");
+      check("and shows no path it cannot walk", noPathThere === true);
+
       console.log("\n  asking someone else for a secret");
 
       const asker = await openTab(base + "/");
@@ -519,6 +547,42 @@ async function main() {
       check("the asker is told the same, and not that they opened a link",
          askerEnding.includes("the shared link leads nowhere")
          && !askerEnding.includes("this link"), askerEnding);
+
+      console.log("\n  a room that runs out of time");
+
+      const owner = await openTab(base + "/");
+      await waitFor(() => owner.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the app");
+      await owner.eval("document.getElementById('pickSend').click()");
+      await owner.eval(`document.getElementById('secret-input').value = ${JSON.stringify(SECRET)};
+         document.getElementById('compose').dispatchEvent(new Event('submit', { cancelable: true }))`);
+      const doomed = await waitFor(() => owner.eval("document.getElementById('link').value || null"), "the link");
+
+      const guest = await openTab(doomed);
+      await waitFor(() => guest.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the room page");
+      await waitFor(() => guest.eval("state.peerSeen || null"), "the pairing");
+
+      // The shortest deadline is two minutes, too long to sit through here. What the page
+      // actually decides on is a poll that finds no room once the deadline it was told has
+      // passed, and that is what both tabs are put in front of.
+      const runOut = "state.expiresAt = Date.now() - 1000; state.token = 'x'.repeat(43); true";
+      const expiredScreen = (tab) => tab.eval(
+         "(() => { const s = document.querySelector('[data-view=expired]');"
+         + " if (s.hidden) return null;"
+         + " return { text: (document.getElementById('status').textContent + ' ' + s.textContent)"
+         + "     .replace(/\\s+/g, ' ').trim(),"
+         + "   again: !document.getElementById('expiredAgain').hidden }; })()");
+
+      await owner.eval(runOut);
+      const ownerExpiry = await waitFor(() => expiredScreen(owner), "the owner's expiry screen");
+      check("a room that runs out of time says so", /expired/i.test(ownerExpiry.text), ownerExpiry.text);
+      check("and does not claim it cannot tell what happened",
+         !/never existed|Nothing here/.test(ownerExpiry.text), ownerExpiry.text);
+      check("whoever opened the room is offered another one", ownerExpiry.again === true);
+
+      await guest.eval(runOut);
+      const guestExpiry = await waitFor(() => expiredScreen(guest), "the guest's expiry screen");
+      check("whoever arrived by link is told the same", /expired/i.test(guestExpiry.text), guestExpiry.text);
+      check("but is not offered an exchange they cannot start", guestExpiry.again === false);
 
    } finally {
       devtools?.close();
