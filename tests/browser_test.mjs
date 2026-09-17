@@ -332,10 +332,35 @@ async function main() {
       check("the recipient is not offered another exchange, they received", receiverAgain === true);
 
       const keepNoteGone = await receiver.eval("document.getElementById('keepNote').hidden");
-      check("the redundant keep-it-safe note is hidden once it arrived", keepNoteGone === true);
+      check("the waiting keep-it-safe note is hidden once it arrived", keepNoteGone === true);
+
+      // The one who receives is told what the one who sends is told: the room is gone for
+      // everyone, this copy is the only one left.
+      const receiverNote = await receiver.eval(
+         "(() => { const note = document.getElementById('goneNote');"
+         + " return { shown: !note.hidden,"
+         + "   text: note.textContent.replace(/\\s+/g, ' ').trim() }; })()");
+      check("the arrival explains that the room is gone for everyone",
+         receiverNote.shown === true && receiverNote.text.includes("the shared link"),
+         JSON.stringify(receiverNote));
+      check("and that this page is the only copy left",
+         receiverNote.text.includes("the only place the secret exists now"),
+         JSON.stringify(receiverNote));
+
+      const revealLabel = await receiver.eval(
+         "document.querySelector('[data-view=reveal] label').textContent");
+      check("the box is labelled as the secret, not as 'here it is'",
+         revealLabel === "The secret they sent you", revealLabel);
+
+      // This one followed the link; the other flow's recipient sent it. "This link" would
+      // be wrong for one of them, so neither is told whose link it was.
+      const receiverEnding = await receiver.eval("document.getElementById('status').textContent");
+      check("whoever receives is told the shared link leads nowhere",
+         receiverEnding.includes("the shared link leads nowhere"), receiverEnding);
 
       const senderDone = await waitFor(() => sender.eval(
-         "document.getElementById('status').textContent.includes('Delivered') || null"), "delivery");
+         "document.getElementById('status').textContent"
+         + " === 'Delivered — it reached them. Nothing left to delete.' || null"), "delivery");
       check("the sender is told it went through", senderDone === true);
 
       const senderSteps = await waitFor(async () => {
@@ -345,11 +370,26 @@ async function main() {
       check("the sender's steps reach the end", senderSteps.at === senderSteps.total - 1,
          JSON.stringify(senderSteps));
 
-      const senderAgain = await sender.eval(
-         "(() => { const b = document.getElementById('handover');"
-         + " return b.disabled ? null : b.textContent; })()");
-      check("the sender is offered another exchange", senderAgain === "Start another",
-         String(senderAgain));
+      const senderDoneScreen = await sender.eval(
+         "(() => { const done = document.querySelector('[data-view=done]');"
+         + " return { shown: !done.hidden, heading: done.querySelector('.verdict'),"
+         + "   again: done.querySelector('a').textContent }; })()");
+      check("the sender lands on a conclusive delivered screen", senderDoneScreen.shown === true,
+         JSON.stringify(senderDoneScreen));
+      check("the sender is offered another exchange",
+         senderDoneScreen.again === "Send another secret", JSON.stringify(senderDoneScreen));
+      // The recipient's final screen says it all in the status line; this one does too,
+      // so a heading here would only repeat it.
+      check("the delivered screen carries no heading of its own",
+         senderDoneScreen.heading === null, JSON.stringify(senderDoneScreen));
+
+      // Both flows land on this screen, one having sent the link and one having opened it,
+      // so it must not claim either.
+      const senderDoneWording = await sender.eval(
+         "document.querySelector('[data-view=done]').textContent.replace(/\\s+/g, ' ')");
+      check("the delivered screen speaks of the link without assuming who shared it",
+         senderDoneWording.includes("the shared link")
+         && !/link you (shared|opened)/.test(senderDoneWording), senderDoneWording.trim());
 
       const reopened = await openTab(link);
       await waitFor(() => reopened.eval("document.readyState === 'complete'"), "the reopened link");
@@ -450,6 +490,10 @@ async function main() {
       }
       check("nor does it come back in the other flow", writerBounced === false);
 
+      await waitFor(() => writer.eval(
+         "document.querySelector('[data-view=done]').hidden ? null : true"),
+         "the writer's delivered screen");
+
       const asked = await waitFor(() => asker.eval(
          "(() => { const s = document.getElementById('secret');"
          + " return s.classList.contains('pending') ? null : s.textContent; })()"), "the secret");
@@ -468,6 +512,13 @@ async function main() {
          JSON.stringify(askerEnd));
       check("and they are not offered another exchange either, they received",
          askerEnd.again === true, JSON.stringify(askerEnd));
+
+      // They opened the room and sent the link away: "this link" would be a link they
+      // never had on screen.
+      const askerEnding = await asker.eval("document.getElementById('status').textContent");
+      check("the asker is told the same, and not that they opened a link",
+         askerEnding.includes("the shared link leads nowhere")
+         && !askerEnding.includes("this link"), askerEnding);
 
    } finally {
       devtools?.close();

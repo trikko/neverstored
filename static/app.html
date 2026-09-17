@@ -137,20 +137,32 @@
    </section>
 
    <section data-view="reveal" class="stage" hidden>
-      <label>Here it is</label>
+      <label>The secret they sent you</label>
       <pre id="secret" class="pending">waiting for them to hand it over…</pre>
       <div class="row">
          <button id="copySecret" disabled>Copy the secret</button>
       </div>
       <p class="note" id="keepNote">Once it arrives it exists nowhere else, so put it
       somewhere safe before you close this page.</p>
+      <div id="goneNote" hidden>
+         <p class="hint">This page is the only place the secret exists now. Copy it
+         somewhere safe before you close the tab: nothing here can hand it back to you,
+         and asking them again means starting a new exchange.</p>
+         <p class="hint">The room went out with it: the keys, the ciphertext and the id are
+         gone from our memory, and none of them ever touched a disk. Whoever opens the
+         shared link now sees exactly what they would see for a room that never existed —
+         and so do we.</p>
+      </div>
       <button id="again" class="primary" disabled>Waiting for them</button>
    </section>
 
    <section data-view="done" hidden>
-      <p class="verdict good">Delivered</p>
-      <p class="hint">The room is gone. There was never anything to delete.</p>
-      <a class="primary" href="/">Start another</a>
+      <p class="hint">The room went out with it: the keys, the ciphertext and the id are gone
+      from our memory, and none of them ever touched a disk. Whoever opens the shared link
+      now sees exactly what they would see for a room that never existed — and so do we.</p>
+      <p class="hint">Which also means it cannot be sent again. If they lose it, nobody here
+      can hand it back to them: make a new secret and a new room instead.</p>
+      <a class="primary" href="/">Send another secret</a>
    </section>
 
    <section data-view="gone" hidden>

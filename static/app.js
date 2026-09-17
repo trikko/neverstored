@@ -226,19 +226,22 @@ async function apply(reply) {
          $("copySecret").textContent = "Copied";
       };
 
-      // The status line above already says it is gone and yours to keep; "start another"
-      // would suggest sending something, and the recipient just received.
+      // The waiting note is written for a secret that has not arrived yet; once it has,
+      // the fuller one takes over. "Start another" would suggest sending something, and
+      // the recipient just received.
       $("keepNote").hidden = true;
+      $("goneNote").hidden = false;
       $("again").hidden = true;
 
-      // The arrival gets the page to itself: nothing above it is useful any more.
-      return finish("reveal")("It is yours now. The room is gone — this link no longer exists.");
+      // The arrival gets the page to itself: nothing above it is useful any more. One of
+      // the two sent the link and the other opened it, so it is neither "this link" nor
+      // "the link you shared".
+      return finish("reveal")("It is yours now. The room is gone — the shared link leads nowhere.");
    }
 
    if (reply.delivered && state.role === "sender") {
-      startAnother($("handover"));
-      $("handNote").textContent = "It reached them and the room was destroyed on its way out.";
-      return finish("verify", "handoff")("Delivered. The room is gone — this link no longer exists.");
+      // The delivery gets the page to itself, mirroring the recipient's reveal screen.
+      return finish("done")("Delivered — it reached them. Nothing left to delete.");
    }
 
    if (reply.state === "burned")
@@ -308,13 +311,6 @@ function render() {
    }
 
    whereIsIt("from");
-}
-
-function startAnother(button) {
-   button.disabled = false;
-   button.textContent = "Start another";
-   button.onclick = () => { location.href = "/"; };
-   button.closest(".stage").classList.remove("settled");
 }
 
 function secretInHand() {
