@@ -226,7 +226,10 @@ async function apply(reply) {
          $("copySecret").textContent = "Copied";
       };
 
-      startAnother($("again"));
+      // The status line above already says it is gone and yours to keep; "start another"
+      // would suggest sending something, and the recipient just received.
+      $("keepNote").hidden = true;
+      $("again").hidden = true;
 
       // The arrival gets the page to itself: nothing above it is useful any more.
       return finish("reveal")("It is yours now. The room is gone — this link no longer exists.");

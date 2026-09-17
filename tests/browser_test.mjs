@@ -328,11 +328,11 @@ async function main() {
          "!document.getElementById('copySecret').disabled");
       check("the recipient can copy what arrived", copyReady === true);
 
-      const receiverAgain = await receiver.eval(
-         "(() => { const b = document.getElementById('again');"
-         + " return b.disabled ? null : b.textContent; })()");
-      check("the recipient is offered another exchange", receiverAgain === "Start another",
-         String(receiverAgain));
+      const receiverAgain = await receiver.eval("document.getElementById('again').hidden");
+      check("the recipient is not offered another exchange, they received", receiverAgain === true);
+
+      const keepNoteGone = await receiver.eval("document.getElementById('keepNote').hidden");
+      check("the redundant keep-it-safe note is hidden once it arrived", keepNoteGone === true);
 
       const senderDone = await waitFor(() => sender.eval(
          "document.getElementById('status').textContent.includes('Delivered') || null"), "delivery");
@@ -461,14 +461,13 @@ async function main() {
             + " const items = [...list.children];"
             + " return { total: items.length, at: items.findIndex(n => n.classList.contains('at')),"
             + "   complete: list.classList.contains('complete'),"
-            + "   again: document.getElementById('again').disabled ? null"
-            + "      : document.getElementById('again').textContent }; })()");
+            + "   again: document.getElementById('again').hidden }; })()");
          return state.complete ? state : null;
       }, "the asker's steps to finish");
       check("the asker's steps reach the end too", askerEnd.at === askerEnd.total - 1,
          JSON.stringify(askerEnd));
-      check("and they are offered another exchange", askerEnd.again === "Start another",
-         String(askerEnd.again));
+      check("and they are not offered another exchange either, they received",
+         askerEnd.again === true, JSON.stringify(askerEnd));
 
    } finally {
       devtools?.close();
