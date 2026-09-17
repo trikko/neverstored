@@ -164,10 +164,10 @@ private void complain(Request request)
       "; headers seen: ", request.header.data.map!(x => cast(string)x.key).array.sort.join(" "));
 }
 
-@endpoint @route!"/" void home(Request request, Output output) { page(request, output, import("app.html")); }
-@endpoint @route!"/how-it-works" void how(Request request, Output output) { page(request, output, import("how.html")); }
-@endpoint @route!"/cli" void cli(Request request, Output output) { page(request, output, import("cli.html")); }
-@endpoint @route!"/privacy" void privacyPolicy(Request request, Output output) { page(request, output, import("privacy.html")); }
+@endpoint @route!"/" void home(Request request, Output output) { page(request, output, import("app.html"), "/"); }
+@endpoint @route!"/how-it-works" void how(Request request, Output output) { page(request, output, import("how.html"), "/how-it-works"); }
+@endpoint @route!"/cli" void cli(Request request, Output output) { page(request, output, import("cli.html"), "/cli"); }
+@endpoint @route!"/privacy" void privacyPolicy(Request request, Output output) { page(request, output, import("privacy.html"), "/privacy"); }
 
 @endpoint @route!(r => r.path.length > 3 && r.path[0 .. 3] == "/r/")
 void room(Request request, Output output)
@@ -179,7 +179,9 @@ void room(Request request, Output output)
       return;
    }
 
-   page(request, output, import("app.html"));
+   // A room is the same page as the home, with a room loaded client-side: it has no content
+   // of its own worth a distinct canonical, and its URL is disallowed in robots.txt anyway.
+   page(request, output, import("app.html"), "/");
 }
 
 @endpoint @route!"/app.js" void appScript(Output output) { asset(output, "application/javascript", import("app.js")); }
@@ -212,6 +214,24 @@ void securityTxtAlias(Request request, Output output)
    output.addHeader("location", "/.well-known/security.txt");
 }
 
+@endpoint @route!"/robots.txt"
+void robotsTxt(Request request, Output output)
+{
+   import std.array : replace;
+   output.addHeader("content-type", "text/plain; charset=utf-8");
+   output.addHeader("cache-control", "no-store");
+   output ~= import("robots.txt").replace("{{origin}}", origin(request));
+}
+
+@endpoint @route!"/sitemap.xml"
+void sitemapXml(Request request, Output output)
+{
+   import std.array : replace;
+   output.addHeader("content-type", "application/xml; charset=utf-8");
+   output.addHeader("cache-control", "no-store");
+   output ~= import("sitemap.xml").replace("{{origin}}", origin(request));
+}
+
 @endpoint @priority(-100)
 void notFound(Request request, Output output)
 {
@@ -225,7 +245,7 @@ void notFound(Request request, Output output)
  + server has no configured name of its own: the only thing that knows what this instance is
  + called is the request. So the name travels from the proxy into the page, once per request.
 +/
-private void page(Request request, Output output, string body_)
+private void page(Request request, Output output, string body_, string canonicalPath = "")
 {
    import std.array : replace;
 
@@ -233,6 +253,7 @@ private void page(Request request, Output output, string body_)
    output.addHeader("cache-control", "no-store");
    output ~= body_
       .replace("{{origin}}", origin(request))
+      .replace("{{canonical}}", origin(request) ~ canonicalPath)
       .replace("{{operator_name}}", OPERATOR_NAME)
       .replace("{{operator_privacy}}", OPERATOR_PRIVACY);
 }
