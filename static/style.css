@@ -401,9 +401,16 @@ pre#secret.pending {
 
 /* symbols */
 
-#symbols { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+#symbols {
+   display: flex;
+   gap: 10px;
+   padding: 22px 6px 16px;
+   border: 1.5px solid var(--line);
+   border-radius: var(--radius);
+   background: var(--bg);
+}
 
-#symbols.pending span {
+#symbols.pending {
    border-style: dashed;
    background: none;
    color: var(--line);
@@ -412,10 +419,7 @@ pre#secret.pending {
 #symbols.pending i { opacity: 0.35; }
 
 #symbols span {
-   padding: 22px 6px 16px;
-   border: 1.5px solid var(--line);
-   border-radius: var(--radius);
-   background: var(--bg);
+   flex: 1;
    text-align: center;
 }
 
