@@ -257,9 +257,12 @@ async function main() {
       check("the server has nothing to show without a token", leakedToServer.includes("notfound"));
 
       const drawnEarly = await sender.eval(
-         "(() => { const b = document.getElementById('handover');"
-         + " return b.offsetParent !== null && b.disabled; })()");
-      check("the handover button is drawn, disabled, before both confirm", drawnEarly === true);
+         "document.getElementById('handover').offsetParent !== null");
+      check("no handover button is offered while it could not be pressed", drawnEarly === false);
+
+      const quietEarly = await sender.eval("document.title");
+      check("and nothing claims it is the sender's turn before it is",
+         !quietEarly.includes("Your turn"), quietEarly);
 
       const settledBefore = await sender.eval(
          "document.querySelector('[data-view=verify]').classList.contains('settled')");
@@ -288,19 +291,88 @@ async function main() {
       await waitFor(() => sender.eval(
          "!document.getElementById('handover').disabled"), "the handover button to unlock");
 
-      const settledAfter = await sender.eval(
-         "document.querySelector('[data-view=verify]').classList.contains('settled')");
-      check("once confirmed, the symbols step back", settledAfter === true);
-      await sender.eval("document.getElementById('handover').click()");
+      // Whoever holds the secret has just spent a minute comparing symbols somewhere else,
+      // so the moment it becomes their turn has to reach them off the page as well.
+      const turnAnnounced = await waitFor(() => sender.eval(
+         "document.title.includes('Your turn') || null"), "the sender's turn notice");
+      check("the sender is told it is their turn, tab in the background or not",
+         turnAnnounced === true);
 
-      // Handing over must not bounce back through the writing box on its way to the end.
+      const handoffAlone = await waitFor(() => sender.eval(
+         "(() => { const v = document.querySelector('[data-view=verify]');"
+         + " const h = document.querySelector('[data-view=handoff]');"
+         + " return v.hidden && !h.hidden ? true : null; })()"),
+         "the handover screen");
+      check("whoever wrote before sharing reaches a screen of its own to hand it over",
+         handoffAlone === true);
+
+      const handWording = await sender.eval(
+         "(() => { const p = document.querySelector('[data-view=handoff] p:not([hidden])');"
+         + " return { text: p.textContent.replace(/\\s+/g, ' ').trim(),"
+         + "   quoted: p.classList.contains('note') }; })()");
+      check("and reads it as plain text, not as an aside", handWording.quoted === false);
+      check("which says it has not gone anywhere yet",
+         /not|nothing/i.test(handWording.text) && /press/i.test(handWording.text),
+         handWording.text);
+
+      const askedToAct = await sender.eval(
+         "document.getElementById('status').textContent + ' '"
+         + " + document.querySelector('[data-view=handoff]').textContent");
+      check("and the sender is told the other side is waiting on them",
+         /waiting/i.test(askedToAct), askedToAct.replace(/\s+/g, " ").trim());
+
+      // The pointer arriving must not take the paint off it: the hover shorthand drops the
+      // gradient at once, and the colour it replaces it with starts from nothing.
+      const hoverSpot = await sender.eval(
+         "(() => { const r = document.getElementById('handover').getBoundingClientRect();"
+         + " return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()");
+      await devtools.send("Input.dispatchMouseEvent",
+         { type: "mouseMoved", x: hoverSpot.x, y: hoverSpot.y }, sender.sessionId);
+      const hovered = await sender.eval(
+         "(() => { const c = getComputedStyle(document.getElementById('handover'));"
+         + " return { image: c.backgroundImage, colour: c.backgroundColor }; })()");
+      check("hovering the handover never leaves it unpainted",
+         hovered.image !== "none", JSON.stringify(hovered));
+
+      const pressSnapshot = "(() => { const h = document.getElementById('handover');"
+         + " const r = h.getBoundingClientRect();"
+         + " return { label: h.textContent, top: r.top, scroll: window.scrollY,"
+         + "   steps: [...document.querySelectorAll('#steps li')].map(n => n.textContent).join('|') }; })()";
+
+      const beforePress = await sender.eval(pressSnapshot);
+      await sender.eval("document.getElementById('handover').click()");
+      await waitFor(() => sender.eval(
+         "/Sent\\./.test(document.getElementById('status').textContent) || null"), "the sent notice");
+      const afterPress = await sender.eval(pressSnapshot);
+
+      check("pressing it leaves the button where and what it was",
+         afterPress.label === beforePress.label && Math.abs(afterPress.top - beforePress.top) < 1
+            && afterPress.scroll === beforePress.scroll,
+         JSON.stringify(beforePress) + " -> " + JSON.stringify(afterPress));
+      check("and does not walk the steps back",
+         afterPress.steps === beforePress.steps, beforePress.steps + " -> " + afterPress.steps);
+
+      // Handing over must not bounce back through the writing box on its way to the end,
+      // nor rearrange the screen it was pressed on: the only screen it may lead to is the
+      // one that ends the exchange.
       let bounced = false;
+      let stripped = false;
       for (let i = 0; i < 12; i++) {
-         if (await sender.eval("!document.querySelector('[data-view=compose]').hidden"))
-            bounced = true;
+         const now = await sender.eval(
+            "(() => { const v = document.querySelector('[data-view=verify]');"
+            + " const c = document.querySelector('[data-view=compose]');"
+            + " const h = document.querySelector('[data-view=handoff]');"
+            + " return { box: !c.hidden, symbols: !v.hidden, hand: !h.hidden }; })()");
+         if (now.box) bounced = true;
+         if (now.hand && now.symbols) stripped = true;
          await sleep(120);
       }
       check("the writing box never comes back after handing over", bounced === false);
+      check("and the handover screen is not rebuilt while it waits", stripped === false);
+
+      const titleCalmed = await waitFor(() => sender.eval(
+         "!document.title.includes('Your turn') || null"), "the title to settle");
+      check("and the tab stops asking once it has been handed over", titleCalmed === true);
 
       const revealArrived = await waitFor(() => receiver.eval(
          "!document.querySelector('[data-view=reveal]').hidden || null"), "the secret box");
@@ -467,10 +539,60 @@ async function main() {
 
       await waitFor(() => symbolsOf(writer), "symbols");
       await waitFor(() => symbolsOf(asker), "symbols");
+
+      // Writing inside someone else's room is one screen from start to finish: the button
+      // is on it from the moment there is a box to fill, out of reach until it is earned.
+      const offeredEarly = await writer.eval(
+         "(() => { const b = document.getElementById('handover');"
+         + " const q = document.querySelector('[data-view=handoff] p.note');"
+         + " return { shown: b.offsetParent !== null, locked: b.disabled,"
+         + "   quoted: q !== null && q.offsetParent !== null,"
+         + "   text: q ? q.textContent.replace(/\\s+/g, ' ').trim() : '' }; })()");
+      check("the writer is shown the handover before it can be pressed",
+         offeredEarly.shown && offeredEarly.locked, JSON.stringify(offeredEarly));
+      check("with the promise quoted above it", offeredEarly.quoted === true);
+      check("and the promise says both what holds it here and what pressing costs",
+         /stays in this page/i.test(offeredEarly.text)
+            && /only moment anything leaves your device/i.test(offeredEarly.text),
+         offeredEarly.text);
+
+      const hintNotRepeated = await writer.eval(
+         "(() => { const h = document.querySelector('[data-view=compose] .hint');"
+         + " return h === null || h.offsetParent === null; })()");
+      check("and is not told the same thing twice under the box", hintNotRepeated === true);
+
       await writer.eval("document.getElementById('confirm').click()");
+
+      // Viewport position alone proves nothing here: show() focuses the box on every
+      // render, and that focus scrolls it back under the caret however much the page
+      // above it has changed height. What must hold is that neither moved.
+      const placeWas = await writer.eval(
+         "(() => { const b = document.getElementById('secret-input').getBoundingClientRect();"
+         + " return { top: b.top, scroll: window.scrollY }; })()");
+
       await asker.eval("document.getElementById('confirm').click()");
 
       await waitFor(() => writer.eval("!document.getElementById('handover').disabled"), "the handover button");
+
+      const placeNow = await writer.eval(
+         "(() => { const b = document.getElementById('secret-input').getBoundingClientRect();"
+         + " return { top: b.top, scroll: window.scrollY }; })()");
+      check("nothing moves under the caret when it becomes the writer's turn",
+         Math.abs(placeNow.top - placeWas.top) < 1 && placeNow.scroll === placeWas.scroll,
+         JSON.stringify(placeWas) + " -> " + JSON.stringify(placeNow));
+
+      const writerTold = await waitFor(() => writer.eval(
+         "document.title.includes('Your turn') || null"), "the writer's turn notice");
+      check("the writer is told it is their turn in this direction too", writerTold === true);
+
+      // Here a caret may be sitting in the box when the other side confirms, so the
+      // handover arrives under it and everything above it stays where it was.
+      const writerKeeps = await writer.eval(
+         "(() => { const c = document.querySelector('[data-view=compose]');"
+         + " const h = document.querySelector('[data-view=handoff]');"
+         + " return { box: !c.hidden, hand: !h.hidden }; })()");
+      check("the writer keeps the box, and the handover arrives with it",
+         writerKeeps.box && writerKeeps.hand, JSON.stringify(writerKeeps));
 
       const oversized = await writer.eval(
          "(() => { const box = document.getElementById('secret-input');"
@@ -503,20 +625,48 @@ async function main() {
       const EDITED = OTHER + "-edited";
       await writer.eval(`document.getElementById('secret-input').value = ${JSON.stringify(EDITED)};
          document.getElementById('secret-input').dispatchEvent(new Event('input'))`);
-      await writer.eval("document.getElementById('handover').click()");
+      const writerSnapshot = "(() => { const h = document.getElementById('handover');"
+         + " const b = document.getElementById('secret-input');"
+         + " return { label: h.textContent, top: h.getBoundingClientRect().top,"
+         + "   boxTop: b.getBoundingClientRect().top, scroll: window.scrollY,"
+         + "   steps: [...document.querySelectorAll('#steps li')].map(n => n.textContent).join('|') }; })()";
 
-      // The box is legitimately still there while the handover is in flight; what must
-      // never happen is that it comes back once it has gone.
+      const writerBefore = await writer.eval(writerSnapshot);
+      await writer.eval("document.getElementById('handover').click()");
       await waitFor(() => writer.eval(
-         "document.querySelector('[data-view=compose]').hidden || null"), "the box to close");
+         "document.getElementById('secret-input').disabled || null"), "the box to go quiet");
+      const writerAfter = await writer.eval(writerSnapshot);
+
+      check("pressing it leaves this screen exactly as it was, too",
+         writerAfter.label === writerBefore.label
+            && Math.abs(writerAfter.top - writerBefore.top) < 1
+            && Math.abs(writerAfter.boxTop - writerBefore.boxTop) < 1
+            && writerAfter.scroll === writerBefore.scroll,
+         JSON.stringify(writerBefore) + " -> " + JSON.stringify(writerAfter));
+      check("and does not walk the steps back either",
+         writerAfter.steps === writerBefore.steps,
+         writerBefore.steps + " -> " + writerAfter.steps);
+
+      const boxQuiet = await writer.eval(
+         "(() => { const b = document.getElementById('secret-input');"
+         + " return { held: b.value, shut: b.disabled, shown: b.offsetParent !== null }; })()");
+      check("the box keeps its place and its text, out of use rather than emptied",
+         boxQuiet.held === EDITED && boxQuiet.shut && boxQuiet.shown, JSON.stringify(boxQuiet));
 
       let writerBounced = false;
+      let writerStripped = false;
       for (let i = 0; i < 12; i++) {
-         if (await writer.eval("!document.querySelector('[data-view=compose]').hidden"))
-            writerBounced = true;
+         const now = await writer.eval(
+            "(() => { const c = document.querySelector('[data-view=compose]');"
+            + " const v = document.querySelector('[data-view=verify]');"
+            + " const h = document.querySelector('[data-view=handoff]');"
+            + " return { box: !c.hidden, symbols: !v.hidden, hand: !h.hidden }; })()");
+         if (now.hand && !now.box) writerBounced = true;
+         if (now.hand && !now.symbols) writerStripped = true;
          await sleep(120);
       }
-      check("nor does it come back in the other flow", writerBounced === false);
+      check("and never leaves while the pickup is waited for", writerBounced === false);
+      check("and pressing it rearranges nothing while it waits", writerStripped === false);
 
       await waitFor(() => writer.eval(
          "document.querySelector('[data-view=done]').hidden ? null : true"),

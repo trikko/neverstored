@@ -286,6 +286,9 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 
 .primary:hover { background: #2845e6; }
 .go { background: linear-gradient(140deg, var(--accent), #6a4dff); }
+/* The shorthand above drops the gradient the moment the pointer arrives, while the colour
+   underneath is still transitioning in from nothing: the button blinks out and back. */
+.go:hover { background-image: linear-gradient(140deg, #2845e6, #5a3df0); }
 
 .intro {
    margin-bottom: 24px;
@@ -377,8 +380,10 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
    color: var(--warn);
 }
 
-/* Everything is drawn from the start; only its state changes, so the page never
-   jumps under the hand of whoever is about to act. */
+/* Everything is drawn from the start and only its state changes, so the page never
+   jumps under the hand of whoever is about to act. The one exception is the moment the
+   room turns ready: there the stage that is done gives way to the one that is not, or
+   nobody would notice their turn had come. */
 
 .stage { transition: opacity 0.25s; }
 

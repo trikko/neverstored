@@ -19,6 +19,7 @@ const state = {
    last: null,
    confirmed: false,
    peerSeen: false,
+   announced: false,
    finished: false,
    expiresAt: 0,
 };
@@ -173,9 +174,13 @@ function drawSymbols() {
 /// The tab title is the whole notice. A real notification would need permission we would
 /// have to ask for while the code is on screen, and on Android it cannot be raised at all
 /// without a service worker — which is not a thing to install on a site that keeps nothing.
-function alertPeerArrived() {
-   document.title = "Someone is here — neverstored";
-}
+/// Both sides step away from the page to compare the symbols, so the two moments that
+/// need them back are said in the tab as well, where they will actually look.
+function callBack(what) { document.title = what + " — neverstored"; }
+
+function stopCalling() { document.title = "neverstored"; }
+
+function alertPeerArrived() { callBack("Someone is here"); }
 
 /// One place schedules the next poll, and it cancels the pending one first: two chains
 /// running at once would poll each other's versions away.
@@ -256,6 +261,14 @@ async function apply(reply) {
       if (state.owner) alertPeerArrived();
    }
 
+   // Whoever holds the secret has just spent a minute reading symbols out somewhere
+   // else, and comes back to a page where a button quietly stopped being grey. That is
+   // the one change they cannot be left to notice on their own.
+   if (reply.state === "ready" && !state.announced && state.role === "sender" && !state.sent) {
+      state.announced = true;
+      callBack("Your turn");
+   }
+
    if (reply.ct) {
       const secret = await unseal(state.session, state.room, reply.ct);
       $("secret").textContent = secret;
@@ -300,12 +313,12 @@ function render() {
    const sending = state.role === "sender";
    const alone = reply.state === "created";
    const ready = reply.state === "ready";
-   // Whoever writes inside the room keeps the box until they actually hand it over,
-   // so the secret can still be edited after the symbols are agreed.
-   const writing = sending && !state.sent && !state.secret;
+   // Whoever writes inside someone else's room keeps the box from the moment they
+   // arrive: editable while the secret is still theirs, then inert in the same place.
+   const writing = sending && state.owner === false;
 
    // While nobody is there, there is only the link. From the moment the other side
-   // arrives, every remaining stage is on screen at once and only its state changes.
+   // arrives, every remaining stage is on screen at once, until the room is ready.
    if (alone) {
       show(state.owner ? "link" : "waiting");
       atStep(state.owner ? "share" : "open");
@@ -319,16 +332,28 @@ function render() {
       return;
    }
 
+   // The two ways of holding the secret want opposite things here. Whoever wrote it
+   // before sharing the link has nothing else on screen, and walked away to compare
+   // symbols: for them the handover is a screen of its own, arriving when it is earned,
+   // which is the one change they cannot miss. Whoever writes inside someone else's room
+   // may have a caret in the box when the other side confirms, so they never leave their
+   // one screen: the button is on it throughout, out of reach until both have confirmed.
+   const wrote = sending && state.owner;
    const stages = [];
    if (writing) stages.push("compose");
-   stages.push("verify");
-   if (sending) stages.push("handoff");
+   if (!(ready && wrote)) stages.push("verify");
+   if (sending && (ready || !wrote)) stages.push("handoff");
    show(...stages);
+
+   // Said once, next to the button it is about, and in the shape that screen needs.
+   $("handNote").hidden = !wrote;
+   $("handQuote").hidden = wrote;
+   $("composeHint").hidden = !!state.room;
 
    // Whoever writes inside the room verifies first and writes after, which is also
    // the order the blocks appear in.
    atStep(writing
-      ? (!ready ? "verify" : secretInHand() ? "hand" : "write")
+      ? (!ready ? "verify" : state.sent || secretInHand() ? "hand" : "write")
       : !ready ? "verify" : sending ? "hand" : "receive");
 
    drawSymbols();
@@ -336,14 +361,15 @@ function render() {
    $("continue").hidden = !!state.room;
    $("handover").disabled = state.sent || !ready || !secretInHand() || !secretFits();
 
+   $("secret-input").disabled = state.sent;
+
    if (state.sent) {
-      $("handover").textContent = "Handed over";
       say("Sent. Waiting for them to pick it up.");
    } else if (ready) {
       say(sending
          ? (secretInHand()
-            ? "Both confirmed. Nothing is sent until you press the button."
-            : "Both confirmed. Write the secret to hand it over.")
+            ? "They are waiting for you."
+            : "They are waiting. Write the secret and hand it over.")
          : "Both confirmed. Waiting for them to hand it over.");
    } else {
       say(state.confirmed
@@ -372,6 +398,8 @@ function finish(...views) {
    return (text) => {
       state.finished = true;
       state.secret = null;
+      stopCalling();
+      $("secret-input").value = "";
       show(...views);
       atStep(views.includes("reveal") ? "receive" : views.includes("handoff") ? "hand" : "");
       settle(true, true);
@@ -468,6 +496,10 @@ function wire() {
 
    setInterval(drawExpiry, 1000);
 
+   document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) stopCalling();
+   });
+
    const inRoom = location.pathname.startsWith("/r/");
 
    if (inRoom) {
@@ -544,7 +576,7 @@ function wire() {
 
       state.sent = true;
       state.secret = null;
-      $("secret-input").value = "";
+      stopCalling();
       render();
    };
 

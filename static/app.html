@@ -123,16 +123,20 @@
       <label for="secret-input">The secret</label>
       <textarea id="secret-input" rows="7" autocomplete="off" autocapitalize="off"
          spellcheck="false" placeholder="Paste the password, key or token here"></textarea>
-      <p class="hint">It stays in this page. Nothing is sent until the other person is here
-      and you both agree on the symbols.</p>
+      <p class="hint" id="composeHint">It stays in this page. Nothing is sent until the
+      other person is here and you both agree on the symbols.</p>
       <p class="note warn" id="tooBig" hidden>That is more than 8 KB. This is made for
       secrets — a password, a key, a short config — not for files.</p>
       <button class="primary" id="continue">Continue</button>
    </form>
 
    <section data-view="handoff" class="stage" hidden>
-      <p class="note" id="handNote">This is the only moment anything leaves your device. It
-      travels encrypted, and our server keeps no copy.</p>
+      <p class="hint" id="handNote">Nothing has left your device yet. Press, and the
+      secret is encrypted here and relayed once: our server keeps no copy.</p>
+      <p class="note" id="handQuote" hidden>It stays in this page. Nothing is sent until
+      the other person is here and you both agree on the symbols. Pressing is the only
+      moment anything leaves your device: it travels encrypted, and our server keeps no
+      copy.</p>
       <button id="handover" class="primary go" disabled>Hand it over</button>
    </section>
 
