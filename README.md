@@ -19,7 +19,7 @@ was ever written.
 3. They open it. The two browsers exchange ECDH public keys and each derives the same key.
 4. Both screens show four symbols derived from that key, with a word under each one.
    You check they match — in person, on a call, or in the same chat.
-5. You hand it over. The browser encrypts with AES-GCM, the server passes the bytes from
+5. You send it. The browser encrypts with AES-GCM, the server passes the bytes from
    one connection to the other and forgets them. The room is destroyed and the link dies.
 
 The four symbols are what makes an intercepted link harmless. Someone in the middle can

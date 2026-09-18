@@ -32,11 +32,11 @@ function pathOf() {
    const sending = state.role !== "receiver";
 
    if (state.owner && sending)
-      return [["write", "Write"], ["share", "Share"], ["verify", "Verify"], ["hand", "Hand over"]];
+      return [["write", "Write"], ["share", "Share"], ["verify", "Verify"], ["hand", "Send"]];
    if (state.owner)
       return [["share", "Share"], ["verify", "Verify"], ["receive", "Receive"]];
    if (sending)
-      return [["open", "Open"], ["verify", "Verify"], ["write", "Write"], ["hand", "Hand over"]];
+      return [["open", "Open"], ["verify", "Verify"], ["write", "Write"], ["hand", "Send"]];
 
    return [["open", "Open"], ["verify", "Verify"], ["receive", "Receive"]];
 }
@@ -167,7 +167,7 @@ function drawSymbols() {
       const words = state.session.symbols.map((i) => SYMBOLS[i][1]).join(" ");
       const faces = state.session.symbols.map((i) => SYMBOLS[i][0]).join("");
       navigator.clipboard.writeText(faces + " (" + words + ")");
-      $("copySymbols").textContent = "copied";
+      $("copySymbols").textContent = "Copied";
    };
 }
 
@@ -224,7 +224,7 @@ async function poll() {
          // through a link and has nothing to start again.
          if (state.expiresAt && Date.now() >= state.expiresAt) {
             $("expiredAgain").hidden = !state.owner;
-            return finish("expired")("This room expired before the secret was handed over.");
+            return finish("expired")("This room expired before the secret was sent.");
          }
          return finish("gone")("This room is gone. Nothing was left behind.");
       }
@@ -325,8 +325,8 @@ function render() {
       drawTrack();
       say(state.owner
          ? (sending
-            ? "This link is not a secret — it is just an address. Send it however you like."
-            : "Send them this link and they will write the secret on their side.")
+            ? "This link is not a secret — it is just an address. Share it however you like."
+            : "Share this link with them and they will write the secret on their side.")
          : "Connected. Waiting for the other side.");
       whereIsIt(sending ? "from" : null);
       return;
@@ -350,6 +350,10 @@ function render() {
    $("handQuote").hidden = wrote;
    $("composeHint").hidden = !!state.room;
 
+   // Once it is gone there is nothing left to take back, and the warning would be about
+   // a button nobody can press any more.
+   $("lastStep").hidden = state.sent;
+
    // Whoever writes inside the room verifies first and writes after, which is also
    // the order the blocks appear in.
    atStep(writing
@@ -369,8 +373,8 @@ function render() {
       say(sending
          ? (secretInHand()
             ? "They are waiting for you."
-            : "They are waiting. Write the secret and hand it over.")
-         : "Both confirmed. Waiting for them to hand it over.");
+            : "They are waiting. Write the secret and send it.")
+         : "Both confirmed. Waiting for them to send it.");
    } else {
       say(state.confirmed
          ? "Waiting for them to confirm the symbols."
@@ -404,7 +408,7 @@ function finish(...views) {
       atStep(views.includes("reveal") ? "receive" : views.includes("handoff") ? "hand" : "");
       settle(true, true);
       say(text);
-      whereIsIt(views.includes("reveal") || views.includes("handoff") ? "to" : null);
+      whereIsIt(views.includes("reveal") || views.includes("done") ? "to" : null);
       drawExpiry();
       window.onbeforeunload = null;
    };
@@ -437,7 +441,7 @@ async function createRoom(flow, secret) {
    $("link").value = link;
    $("copyLink").onclick = () => {
       navigator.clipboard.writeText(link);
-      $("copyLink").textContent = "copied";
+      $("copyLink").textContent = "Copied";
    };
 
    $("qr").hidden = !drawQr($("qr"), link);

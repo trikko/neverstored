@@ -76,7 +76,7 @@
       <div class="picks">
          <button id="pickSend" class="pick">
             <strong>Send a secret</strong>
-            <span>You have something to hand over.</span>
+            <span>You have something to send.</span>
          </button>
          <button id="pickRequest" class="pick">
             <strong>Ask for a secret</strong>
@@ -89,7 +89,7 @@
       <div class="qr-box">
          <canvas id="qr" hidden></canvas>
       </div>
-      <label for="link">Send them this link</label>
+      <label for="link">Share this link with them</label>
       <div class="field">
          <input id="link" readonly>
          <button id="copyLink">Copy</button>
@@ -115,7 +115,7 @@
          <button id="showDigits">Show as numbers</button>
       </div>
       <p class="note warn" id="mismatchNote">If their four are different, someone is in the
-      middle. Stop there and do not hand anything over.</p>
+      middle. Stop there and send nothing.</p>
       <button id="confirm" class="primary">They match</button>
    </section>
 
@@ -127,7 +127,7 @@
       other person is here and you both agree on the symbols.</p>
       <p class="note warn" id="tooBig" hidden>That is more than 8 KB. This is made for
       secrets — a password, a key, a short config — not for files.</p>
-      <button class="primary" id="continue">Continue</button>
+      <button class="primary" id="continue">Continue to the link</button>
    </form>
 
    <section data-view="handoff" class="stage" hidden>
@@ -137,12 +137,15 @@
       the other person is here and you both agree on the symbols. Pressing is the only
       moment anything leaves your device: it travels encrypted, and our server keeps no
       copy.</p>
-      <button id="handover" class="primary go" disabled>Hand it over</button>
+      <button id="handover" class="primary go" disabled><svg viewBox="0 0 16 16"
+         aria-hidden="true" class="plane"><path d="M14.9 1.1 1.1 7.2l5.9 2 2 5.7z"/><path
+         d="M7 9.2 14.9 1.1"/></svg>Send it now</button>
+      <p class="hint" id="lastStep">This is the last step — it cannot be undone.</p>
    </section>
 
    <section data-view="reveal" class="stage" hidden>
       <label>The secret they sent you</label>
-      <pre id="secret" class="pending">waiting for them to hand it over…</pre>
+      <pre id="secret" class="pending">waiting for them to send it…</pre>
       <div class="row">
          <button id="copySecret" disabled>Copy the secret</button>
       </div>
@@ -186,7 +189,7 @@
 
    <section data-view="expired" hidden>
       <p class="verdict">This room expired</p>
-      <p class="hint">It reached its deadline before the secret was handed over, so it was
+      <p class="hint">It reached its deadline before the secret was sent, so it was
       wiped: the keys, the id and anything still in flight are gone from our memory, and none
       of them ever touched a disk. Nothing was delivered, and the link leads nowhere now.</p>
       <a id="expiredAgain" class="primary" href="/" hidden>Start another exchange</a>

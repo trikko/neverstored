@@ -285,10 +285,31 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 }
 
 .primary:hover { background: #2845e6; }
-.go { background: linear-gradient(140deg, var(--accent), #6a4dff); }
+.go {
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   gap: 10px;
+   background: linear-gradient(140deg, var(--accent), #6a4dff);
+}
+
 /* The shorthand above drops the gradient the moment the pointer arrives, while the colour
    underneath is still transitioning in from nothing: the button blinks out and back. */
 .go:hover { background-image: linear-gradient(140deg, #2845e6, #5a3df0); }
+
+/* A drawn plane rather than a character: on this page emoji are what the two of them
+   compare, and one used for decoration elsewhere blunts that. */
+.plane {
+   width: 17px;
+   height: 17px;
+   fill: none;
+   stroke: currentColor;
+   stroke-width: 1.6;
+   stroke-linecap: round;
+   stroke-linejoin: round;
+}
+
+#lastStep { margin-top: 10px; text-align: center; font-size: 13.5px; }
 
 .intro {
    margin-bottom: 24px;

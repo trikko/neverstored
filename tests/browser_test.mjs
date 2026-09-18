@@ -139,7 +139,7 @@ async function main() {
       const senderPath = await sender.eval(
          "[...document.querySelectorAll('#steps li')].map(n => n.textContent).join('|')");
       check("the sender's path appears whole on the first click",
-         senderPath === "1Write|2Share|3Verify|4Hand over", senderPath);
+         senderPath === "1Write|2Share|3Verify|4Send", senderPath);
 
       const boxVisible = await sender.eval(
          "(() => { const b = document.getElementById('secret-input');"
@@ -149,16 +149,37 @@ async function main() {
 
       const focused = await sender.eval("document.activeElement.id");
       check("the writing box takes focus", focused === "secret-input", focused);
+
+      const continueLabel = await sender.eval(
+         "document.getElementById('continue').textContent.replace(/\\s+/g, ' ').trim()");
+      check("the button under the box names where it leads, not what it withholds",
+         continueLabel === "Continue to the link", continueLabel);
       await sender.eval(`document.getElementById('secret-input').value = ${JSON.stringify(SECRET)};
          document.getElementById('compose').dispatchEvent(new Event('submit', { cancelable: true }))`);
 
       const link = await waitFor(() => sender.eval("document.getElementById('link').value || null"), "the link");
       check("the sender gets a room link", link.startsWith(base + "/r/"), link);
 
+      const linkWording = await sender.eval(
+         "(() => { const l = document.querySelector('[data-view=link] label');"
+         + " return { label: l.textContent.replace(/\\s+/g, ' ').trim(),"
+         + "   status: document.getElementById('status').textContent }; })()");
+      check("the link is shared, never sent: the secret is the only thing that is sent",
+         linkWording.label === "Share this link with them"
+         && !/\bsen[dt]\b/i.test(linkWording.status), JSON.stringify(linkWording));
+
+      // Three buttons copy something; a button that answers "copied" next to one that
+      // answers "Copied" reads as two different things happening.
+      const copiedLink = await sender.eval(
+         "(() => { document.getElementById('copyLink').click();"
+         + " return document.getElementById('copyLink').textContent; })()");
+      check("copying the link says so the way every other button does", copiedLink === "Copied",
+         copiedLink);
+
       const pathHeld = await sender.eval(
          "[...document.querySelectorAll('#steps li')].map(n => n.textContent).join('|')");
       check("and does not change shape once the room exists",
-         pathHeld === "1Write|2Share|3Verify|4Hand over", pathHeld);
+         pathHeld === "1Write|2Share|3Verify|4Send", pathHeld);
 
       const quietLinkStage = await sender.eval(
          "(() => { const hidden = (v) => document.querySelector('[data-view=' + v + ']').hidden;"
@@ -246,6 +267,13 @@ async function main() {
 
       const senderSymbols = await waitFor(() => symbolsOf(sender), "the sender symbols");
       const receiverSymbols = await waitFor(() => symbolsOf(receiver), "the receiver symbols");
+      // The warning that stops a man-in-the-middle is the last place to spend an idiom
+      // a reader may not have.
+      const mismatch = await sender.eval(
+         "document.getElementById('mismatchNote').textContent.replace(/\\s+/g, ' ').trim()");
+      check("the warning against a stranger in the middle says it plainly",
+         /someone is in the middle/i.test(mismatch) && !/hand/i.test(mismatch), mismatch);
+
       check("both sides see the same four symbols", senderSymbols === receiverSymbols,
          senderSymbols + " vs " + receiverSymbols);
       check("there are four of them", senderSymbols.split(" ").length === 4, senderSymbols);
@@ -267,6 +295,12 @@ async function main() {
       const settledBefore = await sender.eval(
          "document.querySelector('[data-view=verify]').classList.contains('settled')");
       check("the symbols are live while they still matter", settledBefore === false);
+
+      const copiedSymbols = await sender.eval(
+         "(() => { document.getElementById('copySymbols').click();"
+         + " return document.getElementById('copySymbols').textContent; })()");
+      check("copying the symbols answers in the same word too", copiedSymbols === "Copied",
+         copiedSymbols);
 
       const nothingBefore = await receiver.eval(
          "document.querySelector('[data-view=reveal]').hidden");
@@ -321,6 +355,26 @@ async function main() {
       check("and the sender is told the other side is waiting on them",
          /waiting/i.test(askedToAct), askedToAct.replace(/\s+/g, " ").trim());
 
+      // The one string people act on. The icon carries no text of its own, so the label
+      // stays exact, and it must not speak to a reader who hears it read out.
+      const goButton = await sender.eval(
+         "(() => { const h = document.getElementById('handover');"
+         + " const icon = h.querySelector('svg');"
+         + " return { label: h.textContent.replace(/\\s+/g, ' ').trim(),"
+         + "   drawn: !!icon, quiet: icon ? icon.getAttribute('aria-hidden') === 'true' : false }; })()");
+      check("the last button names the act in words a learner has",
+         goButton.label === "Send it now", JSON.stringify(goButton));
+      check("and carries a drawn icon, not a character borrowed from the symbols",
+         goButton.drawn && goButton.quiet, JSON.stringify(goButton));
+
+      const finality = await sender.eval(
+         "(() => { const p = document.getElementById('lastStep');"
+         + " return p ? { shown: !p.hidden, text: p.textContent.replace(/\\s+/g, ' ').trim() }"
+         + "   : { shown: false, text: '' }; })()");
+      check("with a line saying this one is the last and cannot be taken back",
+         finality.shown && /last step/i.test(finality.text) && /undone/i.test(finality.text),
+         JSON.stringify(finality));
+
       // The pointer arriving must not take the paint off it: the hover shorthand drops the
       // gradient at once, and the colour it replaces it with starts from nothing.
       const hoverSpot = await sender.eval(
@@ -351,6 +405,11 @@ async function main() {
          JSON.stringify(beforePress) + " -> " + JSON.stringify(afterPress));
       check("and does not walk the steps back",
          afterPress.steps === beforePress.steps, beforePress.steps + " -> " + afterPress.steps);
+
+      const finalityGone = await sender.eval(
+         "(() => { const p = document.getElementById('lastStep'); return p ? p.hidden : null; })()");
+      check("and takes the warning with it: there is nothing left to undo",
+         finalityGone === true, String(finalityGone));
 
       // Handing over must not bounce back through the writing box on its way to the end,
       // nor rearrange the screen it was pressed on: the only screen it may lead to is the
@@ -412,6 +471,12 @@ async function main() {
          "!document.getElementById('copySecret').disabled");
       check("the recipient can copy what arrived", copyReady === true);
 
+      const copiedSecret = await receiver.eval(
+         "(() => { document.getElementById('copySecret').click();"
+         + " return document.getElementById('copySecret').textContent; })()");
+      check("and the button answers in the same word as the others", copiedSecret === "Copied",
+         copiedSecret);
+
       const receiverAgain = await receiver.eval("document.getElementById('again').hidden");
       check("the recipient is not offered another exchange, they received", receiverAgain === true);
 
@@ -462,6 +527,15 @@ async function main() {
          JSON.stringify(senderDoneScreen));
       check("the sender is offered another exchange",
          senderDoneScreen.again === "Send another secret", JSON.stringify(senderDoneScreen));
+
+      // The track is the one thing on screen that says where the secret is. Going dark at
+      // the end reads as "nowhere", on the screen that exists to say it arrived.
+      const litAtEnd = await sender.eval(
+         "(() => { const dot = document.querySelector('#where b.lit');"
+         + " return { spot: dot ? dot.dataset.spot : null,"
+         + "   shown: !document.getElementById('where').hidden }; })()");
+      check("and the track still points at the device it reached",
+         litAtEnd.shown && litAtEnd.spot === "to", JSON.stringify(litAtEnd));
       // The recipient's final screen says it all in the status line; this one does too,
       // so a heading here would only repeat it.
       check("the delivered screen carries no heading of its own",
@@ -608,8 +682,13 @@ async function main() {
 
       const writerPath = await writer.eval(
          "[...document.querySelectorAll('#steps li')].map(n => n.textContent).join('|')");
-      check("the writer verifies before writing", writerPath === "1Open|2Verify|3Write|4Hand over",
+      check("the writer verifies before writing", writerPath === "1Open|2Verify|3Write|4Send",
          writerPath);
+
+      const writerGo = await writer.eval(
+         "document.getElementById('handover').textContent.replace(/\\s+/g, ' ').trim()");
+      check("and reads the same last button as the other way round", writerGo === "Send it now",
+         writerGo);
 
       const boxOrder = await writer.eval(
          "(() => { const v = document.querySelector('[data-view=verify]');"

@@ -22,7 +22,7 @@ terminal without echoing. What you receive goes to stdout and nothing else does,
   --no-qr      do not draw the code to scan
   --dense      draw the code half as tall
 
-Exit: 0 handed over or received, 1 symbols refused, 2 room gone or expired,
+Exit: 0 sent or received, 1 symbols refused, 2 room gone or expired,
 3 service unreachable, 4 wrong usage.";
 
 int main(string[] args)

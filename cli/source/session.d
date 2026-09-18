@@ -248,7 +248,7 @@ struct Exchange
       }
 
       if (state == "ready" && role == "receiver")
-         stderr.writeln("Both confirmed. Waiting for them to hand it over.");
+         stderr.writeln("Both confirmed. Waiting for them to send it.");
 
       return Exit.running;
    }
@@ -279,7 +279,7 @@ struct Exchange
          return false;
       }
 
-      stderr.writeln("Stopped. Nothing was handed over.");
+      stderr.writeln("Stopped. Nothing was sent.");
       cancel();
       return false;
    }

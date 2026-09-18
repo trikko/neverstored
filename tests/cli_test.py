@@ -195,6 +195,21 @@ def main():
         check("the asker receives what was written", asker.out.decode() == SECRET,
               repr(asker.out.decode()[:80]))
 
+        # With nothing to read the secret from, the writer sits on stdin after confirming,
+        # which leaves the asker in the one state where it says what it is waiting for.
+        print("\nwaiting to be sent something")
+        asker = Client(url, ["ask"])
+        link = link_from(asker)
+        stuck = Client(url, ["open", link])
+        asker.finish(timeout=4)
+        stuck.finish(timeout=4)
+
+        told = asker.err.decode("utf-8", "replace")
+        check("the one waiting is told in the same words the page uses",
+              "Both confirmed. Waiting for them to send it." in told, told[-200:])
+        check("and is never asked about handing anything over",
+              "hand it over" not in told and "handed over" not in told, told[-200:])
+
         print("\nsaying no, and other endings")
         sender = Client(url, ["send", "--file", secret_file])
         link = link_from(sender)
