@@ -13,6 +13,215 @@ const SECRET = "hunter2-correct-horse-battery-staple";
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
+// Drives render() over every combination of what it reads and reports one line per
+// case: the sections that are up, the step that is lit, which controls are off, which
+// elements are hidden, where the secret is, and the status line. Each case starts from
+// the same blank page, so a line says what render() wrote and nothing about the case
+// before it — the `created` branch returns before it reaches half of these.
+const RENDER_PROBE = `(() => {
+   const OFF = ["handover", "continue", "confirm", "secret-input"];
+   const GONE = ["lastStep", "handNote", "handQuote", "composeHint", "tooBig", "steps", "where"];
+   const box = document.getElementById("secret-input");
+   const out = [];
+
+   // Every case starts from the same blank page, so a shape says what render() wrote and
+   // nothing about the case before it: the \`created\` branch returns before it reaches
+   // half of these, and would otherwise inherit them.
+   const blank = () => {
+      for (const id of OFF) document.getElementById(id).disabled = false;
+      for (const id of GONE) document.getElementById(id).hidden = false;
+      for (const view of document.querySelectorAll("[data-view]")) view.hidden = true;
+      for (const dot of document.querySelectorAll("#where b")) dot.classList.remove("lit");
+      const steps = document.getElementById("steps");
+      steps.textContent = "";
+      delete steps.dataset.shape;
+      delete steps.dataset.at;
+      document.getElementById("status").textContent = "";
+   };
+
+   const shape = () => {
+      const views = [...document.querySelectorAll("[data-view]")]
+         .filter((v) => !v.hidden).map((v) => v.dataset.view).join("+") || "-";
+      const steps = [...document.querySelectorAll("#steps li")]
+         .map((n) => (n.className === "at" ? "[" + n.textContent + "]" : n.textContent)).join("/") || "-";
+      const off = OFF.map((id) => (document.getElementById(id).disabled ? "1" : "0")).join("");
+      const gone = GONE.map((id) => (document.getElementById(id).hidden ? "1" : "0")).join("");
+      const dot = document.querySelector("#where b.lit");
+      return views + " | " + steps + " | " + off + " " + gone + " " + (dot ? dot.dataset.spot : "-")
+         + " | " + document.getElementById("status").textContent;
+   };
+
+   for (const role of ["sender", "receiver"])
+   for (const owner of [true, false])
+   for (const said of ["created", "paired", "ready"])
+   for (const confirmed of [false, true])
+   for (const sent of [false, true])
+   for (const secret of ["none", "held", "typed"]) {
+      Object.assign(state, {
+         role, owner, confirmed, sent, finished: false,
+         room: "rrrrrrrr", token: "t", session: null, step: "",
+         secret: secret === "held" ? "s" : null,
+         last: { state: said, ver: 1, role },
+      });
+      box.value = secret === "typed" ? "s" : "";
+      blank();
+      render();
+      out.push([role, owner ? "owner" : "guest", said, confirmed ? "C" : "-", sent ? "S" : "-", secret]
+         .join(",") + " => " + shape());
+   }
+
+   return out;
+})()`;
+
+// Recorded from the page as it was. A line that moves means the refactoring changed a
+// screen, which is the one thing it must not do.
+const RENDER_SHAPES = `
+   sender,owner,created,-,-,none => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,created,-,-,held => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,created,-,-,typed => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,created,-,S,none => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,created,-,S,held => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,created,-,S,typed => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,created,C,-,none => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,created,C,-,held => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,created,C,-,typed => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,created,C,S,none => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,created,C,S,held => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,created,C,S,typed => link | 1Write/[2Share]/3Verify/4Send | 0000 0000000 from | This link is not a secret — it is just an address. Share it however you like.
+   sender,owner,paired,-,-,none => verify | 1Write/2Share/[3Verify]/4Send | 1000 0011000 from | Someone is here. Check they see the same four symbols.
+   sender,owner,paired,-,-,held => verify | 1Write/2Share/[3Verify]/4Send | 1000 0011000 from | Someone is here. Check they see the same four symbols.
+   sender,owner,paired,-,-,typed => verify | 1Write/2Share/[3Verify]/4Send | 1000 0011000 from | Someone is here. Check they see the same four symbols.
+   sender,owner,paired,-,S,none => verify | 1Write/2Share/[3Verify]/4Send | 1001 1011000 from | Sent. Waiting for them to pick it up.
+   sender,owner,paired,-,S,held => verify | 1Write/2Share/[3Verify]/4Send | 1001 1011000 from | Sent. Waiting for them to pick it up.
+   sender,owner,paired,-,S,typed => verify | 1Write/2Share/[3Verify]/4Send | 1001 1011000 from | Sent. Waiting for them to pick it up.
+   sender,owner,paired,C,-,none => verify | 1Write/2Share/[3Verify]/4Send | 1010 0011000 from | Waiting for them to confirm the symbols.
+   sender,owner,paired,C,-,held => verify | 1Write/2Share/[3Verify]/4Send | 1010 0011000 from | Waiting for them to confirm the symbols.
+   sender,owner,paired,C,-,typed => verify | 1Write/2Share/[3Verify]/4Send | 1010 0011000 from | Waiting for them to confirm the symbols.
+   sender,owner,paired,C,S,none => verify | 1Write/2Share/[3Verify]/4Send | 1011 1011000 from | Sent. Waiting for them to pick it up.
+   sender,owner,paired,C,S,held => verify | 1Write/2Share/[3Verify]/4Send | 1011 1011000 from | Sent. Waiting for them to pick it up.
+   sender,owner,paired,C,S,typed => verify | 1Write/2Share/[3Verify]/4Send | 1011 1011000 from | Sent. Waiting for them to pick it up.
+   sender,owner,ready,-,-,none => handoff | 1Write/2Share/3Verify/[4Send] | 1010 0011000 from | They are waiting. Write the secret and send it.
+   sender,owner,ready,-,-,held => handoff | 1Write/2Share/3Verify/[4Send] | 0010 0011100 from | They are waiting for you.
+   sender,owner,ready,-,-,typed => handoff | 1Write/2Share/3Verify/[4Send] | 0010 0011100 from | They are waiting for you.
+   sender,owner,ready,-,S,none => handoff | 1Write/2Share/3Verify/[4Send] | 1011 1011000 from | Sent. Waiting for them to pick it up.
+   sender,owner,ready,-,S,held => handoff | 1Write/2Share/3Verify/[4Send] | 1011 1011000 from | Sent. Waiting for them to pick it up.
+   sender,owner,ready,-,S,typed => handoff | 1Write/2Share/3Verify/[4Send] | 1011 1011000 from | Sent. Waiting for them to pick it up.
+   sender,owner,ready,C,-,none => handoff | 1Write/2Share/3Verify/[4Send] | 1010 0011000 from | They are waiting. Write the secret and send it.
+   sender,owner,ready,C,-,held => handoff | 1Write/2Share/3Verify/[4Send] | 0010 0011100 from | They are waiting for you.
+   sender,owner,ready,C,-,typed => handoff | 1Write/2Share/3Verify/[4Send] | 0010 0011100 from | They are waiting for you.
+   sender,owner,ready,C,S,none => handoff | 1Write/2Share/3Verify/[4Send] | 1011 1011000 from | Sent. Waiting for them to pick it up.
+   sender,owner,ready,C,S,held => handoff | 1Write/2Share/3Verify/[4Send] | 1011 1011000 from | Sent. Waiting for them to pick it up.
+   sender,owner,ready,C,S,typed => handoff | 1Write/2Share/3Verify/[4Send] | 1011 1011000 from | Sent. Waiting for them to pick it up.
+   sender,guest,created,-,-,none => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,created,-,-,held => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,created,-,-,typed => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,created,-,S,none => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,created,-,S,held => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,created,-,S,typed => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,created,C,-,none => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,created,C,-,held => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,created,C,-,typed => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,created,C,S,none => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,created,C,S,held => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,created,C,S,typed => waiting | [1Open]/2Verify/3Write/4Send | 0000 0000000 from | Connected. Waiting for the other side.
+   sender,guest,paired,-,-,none => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1000 0101000 from | Someone is here. Check they see the same four symbols.
+   sender,guest,paired,-,-,held => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1000 0101000 from | Someone is here. Check they see the same four symbols.
+   sender,guest,paired,-,-,typed => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1000 0101000 from | Someone is here. Check they see the same four symbols.
+   sender,guest,paired,-,S,none => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1001 1101000 from | Sent. Waiting for them to pick it up.
+   sender,guest,paired,-,S,held => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1001 1101000 from | Sent. Waiting for them to pick it up.
+   sender,guest,paired,-,S,typed => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1001 1101000 from | Sent. Waiting for them to pick it up.
+   sender,guest,paired,C,-,none => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1010 0101000 from | Waiting for them to confirm the symbols.
+   sender,guest,paired,C,-,held => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1010 0101000 from | Waiting for them to confirm the symbols.
+   sender,guest,paired,C,-,typed => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1010 0101000 from | Waiting for them to confirm the symbols.
+   sender,guest,paired,C,S,none => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   sender,guest,paired,C,S,held => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   sender,guest,paired,C,S,typed => verify+compose+handoff | 1Open/[2Verify]/3Write/4Send | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   sender,guest,ready,-,-,none => verify+compose+handoff | 1Open/2Verify/[3Write]/4Send | 1010 0101000 from | They are waiting. Write the secret and send it.
+   sender,guest,ready,-,-,held => verify+compose+handoff | 1Open/2Verify/3Write/[4Send] | 0010 0101100 from | They are waiting for you.
+   sender,guest,ready,-,-,typed => verify+compose+handoff | 1Open/2Verify/3Write/[4Send] | 0010 0101100 from | They are waiting for you.
+   sender,guest,ready,-,S,none => verify+compose+handoff | 1Open/2Verify/3Write/[4Send] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   sender,guest,ready,-,S,held => verify+compose+handoff | 1Open/2Verify/3Write/[4Send] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   sender,guest,ready,-,S,typed => verify+compose+handoff | 1Open/2Verify/3Write/[4Send] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   sender,guest,ready,C,-,none => verify+compose+handoff | 1Open/2Verify/[3Write]/4Send | 1010 0101000 from | They are waiting. Write the secret and send it.
+   sender,guest,ready,C,-,held => verify+compose+handoff | 1Open/2Verify/3Write/[4Send] | 0010 0101100 from | They are waiting for you.
+   sender,guest,ready,C,-,typed => verify+compose+handoff | 1Open/2Verify/3Write/[4Send] | 0010 0101100 from | They are waiting for you.
+   sender,guest,ready,C,S,none => verify+compose+handoff | 1Open/2Verify/3Write/[4Send] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   sender,guest,ready,C,S,held => verify+compose+handoff | 1Open/2Verify/3Write/[4Send] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   sender,guest,ready,C,S,typed => verify+compose+handoff | 1Open/2Verify/3Write/[4Send] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,created,-,-,none => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,created,-,-,held => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,created,-,-,typed => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,created,-,S,none => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,created,-,S,held => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,created,-,S,typed => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,created,C,-,none => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,created,C,-,held => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,created,C,-,typed => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,created,C,S,none => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,created,C,S,held => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,created,C,S,typed => link | [1Share]/2Verify/3Receive | 0000 0000000 - | Share this link with them and they will write the secret on their side.
+   receiver,owner,paired,-,-,none => verify | 1Share/[2Verify]/3Receive | 1000 0101000 from | Someone is here. Check they see the same four symbols.
+   receiver,owner,paired,-,-,held => verify | 1Share/[2Verify]/3Receive | 1000 0101000 from | Someone is here. Check they see the same four symbols.
+   receiver,owner,paired,-,-,typed => verify | 1Share/[2Verify]/3Receive | 1000 0101000 from | Someone is here. Check they see the same four symbols.
+   receiver,owner,paired,-,S,none => verify | 1Share/[2Verify]/3Receive | 1001 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,paired,-,S,held => verify | 1Share/[2Verify]/3Receive | 1001 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,paired,-,S,typed => verify | 1Share/[2Verify]/3Receive | 1001 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,paired,C,-,none => verify | 1Share/[2Verify]/3Receive | 1010 0101000 from | Waiting for them to confirm the symbols.
+   receiver,owner,paired,C,-,held => verify | 1Share/[2Verify]/3Receive | 1010 0101000 from | Waiting for them to confirm the symbols.
+   receiver,owner,paired,C,-,typed => verify | 1Share/[2Verify]/3Receive | 1010 0101000 from | Waiting for them to confirm the symbols.
+   receiver,owner,paired,C,S,none => verify | 1Share/[2Verify]/3Receive | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,paired,C,S,held => verify | 1Share/[2Verify]/3Receive | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,paired,C,S,typed => verify | 1Share/[2Verify]/3Receive | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,ready,-,-,none => verify | 1Share/2Verify/[3Receive] | 1010 0101000 from | Both confirmed. Waiting for them to send it.
+   receiver,owner,ready,-,-,held => verify | 1Share/2Verify/[3Receive] | 0010 0101100 from | Both confirmed. Waiting for them to send it.
+   receiver,owner,ready,-,-,typed => verify | 1Share/2Verify/[3Receive] | 0010 0101100 from | Both confirmed. Waiting for them to send it.
+   receiver,owner,ready,-,S,none => verify | 1Share/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,ready,-,S,held => verify | 1Share/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,ready,-,S,typed => verify | 1Share/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,ready,C,-,none => verify | 1Share/2Verify/[3Receive] | 1010 0101000 from | Both confirmed. Waiting for them to send it.
+   receiver,owner,ready,C,-,held => verify | 1Share/2Verify/[3Receive] | 0010 0101100 from | Both confirmed. Waiting for them to send it.
+   receiver,owner,ready,C,-,typed => verify | 1Share/2Verify/[3Receive] | 0010 0101100 from | Both confirmed. Waiting for them to send it.
+   receiver,owner,ready,C,S,none => verify | 1Share/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,ready,C,S,held => verify | 1Share/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,owner,ready,C,S,typed => verify | 1Share/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,created,-,-,none => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,created,-,-,held => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,created,-,-,typed => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,created,-,S,none => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,created,-,S,held => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,created,-,S,typed => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,created,C,-,none => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,created,C,-,held => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,created,C,-,typed => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,created,C,S,none => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,created,C,S,held => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,created,C,S,typed => waiting | [1Open]/2Verify/3Receive | 0000 0000000 - | Connected. Waiting for the other side.
+   receiver,guest,paired,-,-,none => verify | 1Open/[2Verify]/3Receive | 1000 0101000 from | Someone is here. Check they see the same four symbols.
+   receiver,guest,paired,-,-,held => verify | 1Open/[2Verify]/3Receive | 1000 0101000 from | Someone is here. Check they see the same four symbols.
+   receiver,guest,paired,-,-,typed => verify | 1Open/[2Verify]/3Receive | 1000 0101000 from | Someone is here. Check they see the same four symbols.
+   receiver,guest,paired,-,S,none => verify | 1Open/[2Verify]/3Receive | 1001 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,paired,-,S,held => verify | 1Open/[2Verify]/3Receive | 1001 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,paired,-,S,typed => verify | 1Open/[2Verify]/3Receive | 1001 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,paired,C,-,none => verify | 1Open/[2Verify]/3Receive | 1010 0101000 from | Waiting for them to confirm the symbols.
+   receiver,guest,paired,C,-,held => verify | 1Open/[2Verify]/3Receive | 1010 0101000 from | Waiting for them to confirm the symbols.
+   receiver,guest,paired,C,-,typed => verify | 1Open/[2Verify]/3Receive | 1010 0101000 from | Waiting for them to confirm the symbols.
+   receiver,guest,paired,C,S,none => verify | 1Open/[2Verify]/3Receive | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,paired,C,S,held => verify | 1Open/[2Verify]/3Receive | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,paired,C,S,typed => verify | 1Open/[2Verify]/3Receive | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,ready,-,-,none => verify | 1Open/2Verify/[3Receive] | 1010 0101000 from | Both confirmed. Waiting for them to send it.
+   receiver,guest,ready,-,-,held => verify | 1Open/2Verify/[3Receive] | 0010 0101100 from | Both confirmed. Waiting for them to send it.
+   receiver,guest,ready,-,-,typed => verify | 1Open/2Verify/[3Receive] | 0010 0101100 from | Both confirmed. Waiting for them to send it.
+   receiver,guest,ready,-,S,none => verify | 1Open/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,ready,-,S,held => verify | 1Open/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,ready,-,S,typed => verify | 1Open/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,ready,C,-,none => verify | 1Open/2Verify/[3Receive] | 1010 0101000 from | Both confirmed. Waiting for them to send it.
+   receiver,guest,ready,C,-,held => verify | 1Open/2Verify/[3Receive] | 0010 0101100 from | Both confirmed. Waiting for them to send it.
+   receiver,guest,ready,C,-,typed => verify | 1Open/2Verify/[3Receive] | 0010 0101100 from | Both confirmed. Waiting for them to send it.
+   receiver,guest,ready,C,S,none => verify | 1Open/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,ready,C,S,held => verify | 1Open/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+   receiver,guest,ready,C,S,typed => verify | 1Open/2Verify/[3Receive] | 1011 1101000 from | Sent. Waiting for them to pick it up.
+`;
+
 function freePort() {
    return new Promise((done) => {
       const probe = createServer();
@@ -619,6 +828,20 @@ async function main() {
       const noPathThere = await insecure.eval("document.getElementById('steps').hidden");
       check("and shows no path it cannot walk", noPathThere === true);
 
+      // The screen between opening a link and being let into the room lasts one round trip,
+      // and the track is the one thing on it that says where the secret is. Dark there reads
+      // as nowhere, on a page whose whole job is to say it is on the other device. Fired by
+      // hand because the real thing is gone before it can be read.
+      const opening = await openTab(base + "/");
+      await waitFor(() => opening.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the app");
+      const openingTrack = await opening.eval(
+         "(() => { history.replaceState(null, '', '/r/' + 'x'.repeat(8)); wire();"
+         + " const dot = document.querySelector('#where b.lit');"
+         + " return { status: document.getElementById('status').textContent,"
+         + "   spot: dot ? dot.dataset.spot : null }; })()");
+      check("while the link is being opened, the track already points at the other device",
+         openingTrack.spot === "from", JSON.stringify(openingTrack));
+
       console.log("\n  asking someone else for a secret");
 
       const asker = await openTab(base + "/");
@@ -966,6 +1189,25 @@ async function main() {
       const guestExpiry = await waitFor(() => expiredScreen(guest), "the guest's expiry screen");
       check("whoever arrived by link is told the same", /expired/i.test(guestExpiry.text), guestExpiry.text);
       check("but is not offered an exchange they cannot start", guestExpiry.again === false);
+
+      console.log("\n  every screen render() can draw");
+
+      // A net under the refactoring of render(), not a check of any one screen: it drives
+      // render() over every combination of the things it reads — reachable or not, which is
+      // the point — and pins what each one draws. Nothing here says a screen is right; the
+      // screens above do that. This says none of them moved.
+      const drawn = await openTab(base + "/");
+      await waitFor(() => drawn.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the app");
+
+      const shapes = await drawn.eval(RENDER_PROBE);
+      const golden = RENDER_SHAPES.trim().split("\n").map((line) => line.trim());
+      const moved = shapes.map((line, i) => [golden[i], line])
+         .filter(([was, now]) => was !== now);
+      check("render() draws the same " + golden.length + " screens it drew before",
+         shapes.length === golden.length && moved.length === 0,
+         moved.length
+            ? moved.length + " moved, first:\n      was " + moved[0][0] + "\n      now " + moved[0][1]
+            : shapes.length + " shapes against " + golden.length);
 
    } finally {
       devtools?.close();

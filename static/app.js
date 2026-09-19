@@ -8,7 +8,6 @@ const state = {
    room: null,
    token: null,
    role: null,
-   flow: null,
    secret: null,
    identity: null,
    session: null,
@@ -279,29 +278,7 @@ async function apply(reply) {
       callBack("Your turn");
    }
 
-   if (reply.ct) {
-      const secret = await unseal(state.session, state.room, reply.ct);
-      $("secret").textContent = secret;
-      $("secret").classList.remove("pending");
-
-      $("copySecret").disabled = false;
-      $("copySecret").onclick = () => {
-         navigator.clipboard.writeText(secret);
-         $("copySecret").textContent = "Copied";
-      };
-
-      // The waiting note is written for a secret that has not arrived yet; once it has,
-      // the fuller one takes over. "Start another" would suggest sending something, and
-      // the recipient just received.
-      $("keepNote").hidden = true;
-      $("goneNote").hidden = false;
-      $("again").hidden = true;
-
-      // The arrival gets the page to itself: nothing above it is useful any more. One of
-      // the two sent the link and the other opened it, so it is neither "this link" nor
-      // "the link you shared".
-      return finish("reveal")("It is yours now. The room is gone — the shared link leads nowhere.");
-   }
+   if (reply.ct) return reveal(await unseal(state.session, state.room, reply.ct));
 
    if (reply.delivered && state.role === "sender") {
       // The delivery gets the page to itself, mirroring the recipient's reveal screen.
@@ -314,6 +291,43 @@ async function apply(reply) {
    render();
 }
 
+/// The two ways of holding the secret want opposite things here. Whoever wrote it
+/// before sharing the link has nothing else on screen, and walked away to compare
+/// symbols: for them the handover is a screen of its own, arriving when it is earned,
+/// which is the one change they cannot miss. Whoever writes inside someone else's room
+/// may have a caret in the box when the other side confirms, so they never leave their
+/// one screen: the button is on it throughout, out of reach until both have confirmed.
+function viewsFor(writing, sending, wrote, ready) {
+   const views = [];
+   if (writing) views.push("compose");
+   if (!(ready && wrote)) views.push("verify");
+   if (sending && (ready || !wrote)) views.push("handoff");
+   return views;
+}
+
+/// Whoever writes inside the room verifies first and writes after, which is also
+/// the order the blocks appear in.
+function stepFor(writing, sending, ready) {
+   if (!ready) return "verify";
+   if (writing) return state.sent || secretInHand() ? "hand" : "write";
+   return sending ? "hand" : "receive";
+}
+
+function statusFor(sending, ready) {
+   if (state.sent) return "Sent. Waiting for them to pick it up.";
+
+   if (ready)
+      return sending
+         ? (secretInHand()
+            ? "They are waiting for you."
+            : "They are waiting. Write the secret and send it.")
+         : "Both confirmed. Waiting for them to send it.";
+
+   return state.confirmed
+      ? "Waiting for them to confirm the symbols."
+      : "Someone is here. Check they see the same four symbols.";
+}
+
 /// Draws the page from everything known right now, local and remote alike, so a local
 /// action never has to wait for the server to say something new.
 function render() {
@@ -321,7 +335,6 @@ function render() {
    if (!reply || state.finished) return;
 
    const sending = state.role === "sender";
-   const alone = reply.state === "created";
    const ready = reply.state === "ready";
    // Whoever writes inside someone else's room keeps the box from the moment they
    // arrive: editable while the secret is still theirs, then inert in the same place.
@@ -329,71 +342,40 @@ function render() {
 
    // While nobody is there, there is only the link. From the moment the other side
    // arrives, every remaining stage is on screen at once, until the room is ready.
-   if (alone) {
-      show(state.owner ? "link" : "waiting");
-      atStep(state.owner ? "share" : "open");
-      drawTrack();
-      say(state.owner
+   if (reply.state === "created") return paint({
+      views: [state.owner ? "link" : "waiting"],
+      step: state.owner ? "share" : "open",
+      status: state.owner
          ? (sending
             ? "This link is not a secret — it is just an address. Share it however you like."
             : "Share this link with them and they will write the secret on their side.")
-         : "Connected. Waiting for the other side.");
-      whereIsIt(sending ? "from" : null);
-      return;
-   }
+         : "Connected. Waiting for the other side.",
+      spot: sending ? "from" : null,
+   });
 
-   // The two ways of holding the secret want opposite things here. Whoever wrote it
-   // before sharing the link has nothing else on screen, and walked away to compare
-   // symbols: for them the handover is a screen of its own, arriving when it is earned,
-   // which is the one change they cannot miss. Whoever writes inside someone else's room
-   // may have a caret in the box when the other side confirms, so they never leave their
-   // one screen: the button is on it throughout, out of reach until both have confirmed.
    const wrote = sending && state.owner;
-   const stages = [];
-   if (writing) stages.push("compose");
-   if (!(ready && wrote)) stages.push("verify");
-   if (sending && (ready || !wrote)) stages.push("handoff");
-   show(...stages);
+
+   paint({
+      views: viewsFor(writing, sending, wrote, ready),
+      step: stepFor(writing, sending, ready),
+      status: statusFor(sending, ready),
+      spot: "from",
+   });
 
    // Said once, next to the button it is about, and in the shape that screen needs.
    $("handNote").hidden = !wrote;
    $("handQuote").hidden = wrote;
-   $("composeHint").hidden = !!state.room;
 
-
-   // Whoever writes inside the room verifies first and writes after, which is also
-   // the order the blocks appear in.
-   atStep(writing
-      ? (!ready ? "verify" : state.sent || secretInHand() ? "hand" : "write")
-      : !ready ? "verify" : sending ? "hand" : "receive");
+   // Both belong to the screen that came before the room: the hint under the box that was
+   // filled before there was anywhere to send it, and the button that led here. Inside a
+   // room there is nothing for either of them to say.
+   $("composeHint").hidden = true;
+   $("continue").hidden = true;
 
    drawSymbols();
    settle(state.confirmed || ready, ready);
-   $("continue").hidden = !!state.room;
-   $("handover").disabled = state.sent || !ready || !secretInHand() || !secretFits();
-
-   // The warning belongs to the button, wherever the button is: what the press costs is
-   // worth knowing before it can be pressed. Once it is gone there is nothing left to
-   // take back, and the line would be about a button nobody can press any more.
-   $("lastStep").hidden = state.sent;
-
+   gateHandover(ready);
    $("secret-input").disabled = state.sent;
-
-   if (state.sent) {
-      say("Sent. Waiting for them to pick it up.");
-   } else if (ready) {
-      say(sending
-         ? (secretInHand()
-            ? "They are waiting for you."
-            : "They are waiting. Write the secret and send it.")
-         : "Both confirmed. Waiting for them to send it.");
-   } else {
-      say(state.confirmed
-         ? "Waiting for them to confirm the symbols."
-         : "Someone is here. Check they see the same four symbols.");
-   }
-
-   whereIsIt("from");
 }
 
 function secretInHand() {
@@ -411,10 +393,51 @@ function gateContinue() {
    $("continue").disabled = !secretInHand() || !secretFits();
 }
 
+/// The warning belongs to the button, wherever the button is: what the press costs is
+/// worth knowing before it can be pressed. Once it is gone there is nothing left to
+/// take back, and the line would be about a button nobody can press any more.
+function gateHandover(ready) {
+   $("handover").disabled = state.sent || !ready || !secretInHand() || !secretFits();
+   $("lastStep").hidden = state.sent;
+}
+
 function secretFits() {
    const over = secretInHand() && secretSize() > MAX_SECRET_BYTES;
    $("tooBig").hidden = !over;
    return !over;
+}
+
+/// One place draws a screen. A screen is four things — the sections that are up, the step
+/// that is lit, what the status line says, and where the secret is — and each of the four
+/// left out somewhere was a screen half drawn by a caller that forgot it.
+function paint({ views, step = "", status, spot = null }) {
+   show(...views);
+   atStep(step);
+   say(status);
+   whereIsIt(spot);
+}
+
+function reveal(secret) {
+   $("secret").textContent = secret;
+   $("secret").classList.remove("pending");
+
+   $("copySecret").disabled = false;
+   $("copySecret").onclick = () => {
+      navigator.clipboard.writeText(secret);
+      $("copySecret").textContent = "Copied";
+   };
+
+   // The waiting note is written for a secret that has not arrived yet; once it has, the
+   // fuller one takes over. "Start another" would suggest sending something, and the
+   // recipient just received.
+   $("keepNote").hidden = true;
+   $("goneNote").hidden = false;
+   $("again").hidden = true;
+
+   // The arrival gets the page to itself: nothing above it is useful any more. One of the
+   // two sent the link and the other opened it, so it is neither "this link" nor "the link
+   // you shared".
+   finish("reveal")("It is yours now. The room is gone — the shared link leads nowhere.");
 }
 
 function finish(...views) {
@@ -423,11 +446,13 @@ function finish(...views) {
       state.secret = null;
       stopCalling();
       $("secret-input").value = "";
-      show(...views);
-      atStep(views.includes("reveal") ? "receive" : views.includes("handoff") ? "hand" : "");
+      paint({
+         views,
+         step: views.includes("reveal") ? "receive" : views.includes("handoff") ? "hand" : "",
+         status: text,
+         spot: views.includes("reveal") || views.includes("done") ? "to" : null,
+      });
       settle(true, true);
-      say(text);
-      whereIsIt(views.includes("reveal") || views.includes("done") ? "to" : null);
       drawExpiry();
       window.onbeforeunload = null;
    };
@@ -452,7 +477,6 @@ async function createRoom(flow, secret) {
    state.token = reply.token;
    state.owner = true;
    state.role = flow === "send" ? "sender" : "receiver";
-   state.flow = flow;
    state.secret = secret;
    state.version = 0;
 
@@ -467,7 +491,6 @@ async function createRoom(flow, secret) {
 
    state.last = { state: "created", ver: 0, role: state.role };
    render();
-   whereIsIt(secret ? "from" : null);
    guardUnload();
    tick();
 }
@@ -487,23 +510,18 @@ async function joinRoom(id) {
       // A full room is not a missing one: saying the link leads nowhere would be a lie the
       // two people inside could disprove.
       if (reply.err === "occupied") {
-         show("occupied");
-         say("Two people are already in this room.");
+         paint({ views: ["occupied"], status: "Two people are already in this room." });
          return;
       }
 
-      show("gone");
-      say("This link leads nowhere. Nothing was left behind.");
+      paint({ views: ["gone"], status: "This link leads nowhere. Nothing was left behind." });
       return;
    }
 
    state.token = reply.token;
    state.version = 0;
    state.role = "receiver";
-   atStep("open");
-   show("waiting");
-   say("Connected. Waiting for the other side.");
-   whereIsIt("from");
+   paint({ views: ["waiting"], step: "open", status: "Connected. Waiting for the other side.", spot: "from" });
    guardUnload();
    tick();
 }
@@ -512,8 +530,7 @@ function wire() {
    // Browsers only expose WebCrypto in a secure context, so plain http on a LAN address
    // leaves the page unable to do anything. Say so instead of failing silently.
    if (!window.isSecureContext || !window.crypto?.subtle) {
-      show("insecure");
-      say("This page needs a secure connection.");
+      paint({ views: ["insecure"], status: "This page needs a secure connection." });
       return;
    }
 
@@ -527,24 +544,19 @@ function wire() {
 
    if (inRoom) {
       state.role = "receiver";
-      atStep("open");
-      show("waiting");
-      say("Opening…");
+      paint({ views: ["waiting"], step: "open", status: "Opening…", spot: "from" });
       joinRoom(location.pathname.slice(3));
    } else {
-      show("chooser");
-      say("Nothing has been sent yet.");
+      paint({ views: ["chooser"], status: "Nothing has been sent yet." });
 
       // Picking a direction is what decides the path, so claim the role right away
       // instead of letting the steps change shape once the room exists.
       $("pickSend").onclick = () => {
          state.owner = true;
          state.role = "sender";
-         atStep("write");
-         show("compose");
+         paint({ views: ["compose"], step: "write",
+            status: "Still on your device. Nothing has been sent.", spot: "from" });
          gateContinue();
-         say("Still on your device. Nothing has been sent.");
-         whereIsIt("from");
       };
 
       $("pickRequest").onclick = () => {
@@ -608,13 +620,8 @@ function wire() {
       gateContinue();
       if (!state.room) return;
 
-      const ready = state.last && state.last.state === "ready";
-      $("handover").disabled = state.sent || !ready || !secretInHand() || !secretFits();
-
-   // The warning belongs to the button, wherever the button is: what the press costs is
-   // worth knowing before it can be pressed. Once it is gone there is nothing left to
-   // take back, and the line would be about a button nobody can press any more.
-   $("lastStep").hidden = state.sent;
+      const ready = !!state.last && state.last.state === "ready";
+      gateHandover(ready);
       if (ready) atStep(secretInHand() ? "hand" : "write");
    };
 
