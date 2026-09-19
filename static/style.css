@@ -265,7 +265,7 @@ button, a.primary {
    cursor: pointer;
    text-decoration: none;
    text-align: center;
-   transition: border-color 0.15s, background 0.15s, transform 0.05s;
+   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.05s;
 }
 
 button:hover { border-color: #c3c8d4; }
@@ -284,7 +284,37 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
    font-weight: 620;
 }
 
-.primary:hover { background: #2845e6; }
+.primary:hover { background-color: #2845e6; }
+
+/* The two ways in and the one button next to the link are choices, not asides: they carry
+   the accent like everything else that acts. */
+.pick, #copyLink {
+   border-color: var(--accent);
+   background: var(--accent);
+   color: var(--accent-ink);
+}
+
+.pick:hover, #copyLink:hover { border-color: #2845e6; background-color: #2845e6; }
+
+/* Raised rather than decorated: the light along the top edge and the shadow under the
+   bottom one are what a finger reads as pressable, and dropping both on :active is the
+   press. Anything stronger than this stops looking like a surface and starts looking
+   like a sticker. */
+.primary, .pick, #copyLink {
+   background-image: linear-gradient(rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0));
+   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 2px 5px rgba(51, 85, 255, 0.3);
+}
+
+.primary:active, .pick:active, #copyLink:active {
+   background-image: none;
+   box-shadow: inset 0 1px 2px rgba(16, 24, 40, 0.22);
+}
+
+.primary:disabled, .pick:disabled, #copyLink:disabled {
+   background-image: none;
+   box-shadow: none;
+}
+
 .go {
    display: flex;
    align-items: center;
@@ -361,22 +391,51 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 
 .picks { display: grid; gap: 10px; }
 
+/* The mark of where it leads sits beside the title, with the line underneath running the
+   full width: a sign that survives being read in grey, which the colour alone does not. */
 .pick {
-   display: block;
+   display: grid;
+   grid-template-columns: auto 1fr;
+   align-items: center;
+   column-gap: 9px;
    padding: 18px;
    text-align: left;
 }
 
+.pick .arrow {
+   grid-column: 2;
+   grid-row: 1;
+   justify-self: start;
+   width: 18px;
+   height: 18px;
+   fill: none;
+   stroke: currentColor;
+   stroke-width: 1.6;
+   stroke-linecap: round;
+   stroke-linejoin: round;
+   opacity: 0.85;
+   transition: transform 0.15s;
+}
+
+.pick:hover .arrow { transform: translateX(3px); }
+
 .pick strong {
    display: block;
-   color: var(--ink);
+   color: var(--accent-ink);
    font-size: 16px;
    font-weight: 620;
    letter-spacing: -0.01em;
 }
 
-.pick span { display: block; margin-top: 3px; color: var(--dim); font-size: 14px; font-weight: 450; }
-.pick:hover { border-color: var(--accent); background: rgba(51, 85, 255, 0.03); }
+.pick span {
+   display: block;
+   grid-column: 1 / -1;
+   margin-top: 3px;
+   color: var(--accent-ink);
+   opacity: 0.78;
+   font-size: 14px;
+   font-weight: 450;
+}
 
 .row { display: flex; gap: 8px; margin-top: 14px; }
 .row button { flex: 1; }
@@ -605,10 +664,20 @@ pre#secret {
    }
    
    .primary:hover, a.primary:hover { 
-      background: #a5b4fc; 
+      background-color: #a5b4fc; 
       border-color: #a5b4fc; 
    }
 
-   .pick:hover { background: rgba(129, 140, 248, 0.15); }
+   .pick:hover, #copyLink:hover { border-color: #a5b4fc; background-color: #a5b4fc; }
+
+   .primary, .pick, #copyLink {
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), 0 2px 6px rgba(0, 0, 0, 0.5);
+   }
+
+   .primary:active, .pick:active, #copyLink:active {
+      box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.3);
+   }
+
+   .primary:disabled, .pick:disabled, #copyLink:disabled { box-shadow: none; }
    #qr { background: #fff; }
 }
