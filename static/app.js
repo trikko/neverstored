@@ -402,6 +402,13 @@ function secretSize() {
    return new TextEncoder().encode(state.secret || $("secret-input").value).length;
 }
 
+/// The step is not refused, it is simply not reached yet: an empty box has nothing to
+/// carry to the next screen, and a button that answers a press with silence reads as
+/// broken rather than as early.
+function gateContinue() {
+   $("continue").disabled = !secretInHand() || !secretFits();
+}
+
 function secretFits() {
    const over = secretInHand() && secretSize() > MAX_SECRET_BYTES;
    $("tooBig").hidden = !over;
@@ -533,6 +540,7 @@ function wire() {
          state.role = "sender";
          atStep("write");
          show("compose");
+         gateContinue();
          say("Still on your device. Nothing has been sent.");
          whereIsIt("from");
       };
@@ -595,6 +603,7 @@ function wire() {
    };
 
    $("secret-input").oninput = () => {
+      gateContinue();
       if (!state.room) return;
 
       const ready = state.last && state.last.state === "ready";

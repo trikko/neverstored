@@ -156,6 +156,21 @@ async function main() {
       const focused = await sender.eval("document.activeElement.id");
       check("the writing box takes focus", focused === "secret-input", focused);
 
+      // Pressing it with nothing written does nothing at all today, which reads as a
+      // broken button rather than as a step not yet earned.
+      const shutWhileEmpty = await sender.eval("document.getElementById('continue').disabled");
+      check("there is nothing to continue to while the box is empty", shutWhileEmpty === true);
+
+      const gate = await sender.eval(
+         "(() => { const b = document.getElementById('secret-input');"
+         + " const c = document.getElementById('continue');"
+         + " b.value = 'x'; b.dispatchEvent(new Event('input'));"
+         + " const opened = !c.disabled;"
+         + " b.value = ''; b.dispatchEvent(new Event('input'));"
+         + " return { opened, shutAgain: c.disabled }; })()");
+      check("it opens on the first character and shuts again if the box is emptied",
+         gate.opened === true && gate.shutAgain === true, JSON.stringify(gate));
+
       const continueLabel = await sender.eval(
          "document.getElementById('continue').textContent.replace(/\\s+/g, ' ').trim()");
       check("the button under the box names where it leads, not what it withholds",
