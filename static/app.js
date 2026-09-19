@@ -77,6 +77,11 @@ function drawTrack() {
    $("spot-to").textContent = mine ? "your device" : "their device";
 }
 
+/// Deliberately negative: a headless or unusual browser answers no to `pointer: fine`,
+/// and the caret is the behaviour to keep when the device cannot say what it is.
+const FINGER = window.matchMedia("(pointer: coarse)");
+let hasBox = false;
+
 const show = (...ids) => {
    for (const view of document.querySelectorAll("[data-view]"))
       view.hidden = !ids.includes(view.dataset.view);
@@ -91,8 +96,13 @@ const show = (...ids) => {
    drawSteps();
    drawTrack();
 
-   const focusable = document.querySelector("[data-view]:not([hidden]) textarea");
-   if (focusable) focusable.focus();
+   // A caret in the box is worth a saved click on a desktop. On a phone it raises the
+   // keyboard over the screen that says what is about to happen, before anyone has read
+   // it, so the tap is left to the reader. And show() runs on every change, not only on
+   // arrival: focusing again would pull whoever moved away back into the box.
+   const writing = ids.includes("compose");
+   if (writing && !hasBox && !FINGER.matches) $("secret-input").focus();
+   hasBox = writing;
 };
 
 function say(text) { $("status").textContent = text; }

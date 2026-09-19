@@ -109,9 +109,15 @@ async function main() {
 
       devtools = await new Devtools(version.webSocketDebuggerUrl).open();
 
-      const openTab = async (url) => {
+      const openTab = async (url, phone = false) => {
          const { targetId } = await devtools.send("Target.createTarget", { url });
          const { sessionId } = await devtools.send("Target.attachToTarget", { targetId, flatten: true });
+         if (phone) {
+            await devtools.send("Emulation.setDeviceMetricsOverride",
+               { width: 390, height: 780, deviceScaleFactor: 2, mobile: true }, sessionId);
+            await devtools.send("Emulation.setTouchEmulationEnabled",
+               { enabled: true, maxTouchPoints: 5 }, sessionId);
+         }
          const tab = new Tab(devtools, sessionId);
          await tab.eval("1");
          return tab;
@@ -643,16 +649,25 @@ async function main() {
 
       await writer.eval("document.getElementById('confirm').click()");
 
-      // Viewport position alone proves nothing here: show() focuses the box on every
-      // render, and that focus scrolls it back under the caret however much the page
-      // above it has changed height. What must hold is that neither moved.
+      // This used to prove less than it looked: show() refocused the box on every render,
+      // and that focus scrolled it back into view however much the page above it had
+      // changed height. Now nothing pulls it back, so top and scroll are the whole claim.
       const placeWas = await writer.eval(
          "(() => { const b = document.getElementById('secret-input').getBoundingClientRect();"
          + " return { top: b.top, scroll: window.scrollY }; })()");
 
+      // Focus taken once, when the box arrives, is a convenience. Focus taken again
+      // whenever the other side does something is a trap: it drags the reader back into
+      // the box they deliberately left, and on a phone it reopens the keyboard.
+      await writer.eval("document.getElementById('secret-input').blur()");
+
       await asker.eval("document.getElementById('confirm').click()");
 
       await waitFor(() => writer.eval("!document.getElementById('handover').disabled"), "the handover button");
+
+      const stillAway = await writer.eval("document.activeElement.id");
+      check("focus left the box stays left when their turn arrives",
+         stillAway !== "secret-input", stillAway);
 
       const placeNow = await writer.eval(
          "(() => { const b = document.getElementById('secret-input').getBoundingClientRect();"
@@ -782,6 +797,25 @@ async function main() {
       check("the asker is told the same, and not that they opened a link",
          askerEnding.includes("the shared link leads nowhere")
          && !askerEnding.includes("this link"), askerEnding);
+
+      console.log("\n  writing on a phone");
+
+      const phone = await openTab(base + "/", true);
+      await waitFor(() => phone.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the app");
+
+      const coarse = await phone.eval("matchMedia('(pointer: coarse)').matches");
+      check("the emulated device reports a finger, not a mouse", coarse === true);
+
+      await phone.eval("document.getElementById('pickSend').click()");
+
+      // Focusing the box raises the keyboard over the screen that says what is about to
+      // happen, before the reader has read it. A tap is cheaper than that.
+      const phoneFocus = await phone.eval(
+         "(() => { const b = document.getElementById('secret-input');"
+         + " return { visible: b.offsetParent !== null, focused: document.activeElement.id }; })()");
+      check("the box is there to be tapped, and does not raise the keyboard by itself",
+         phoneFocus.visible === true && phoneFocus.focused !== "secret-input",
+         JSON.stringify(phoneFocus));
 
       console.log("\n  a poll that goes wrong");
 
