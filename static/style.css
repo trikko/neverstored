@@ -268,7 +268,7 @@ button, a.primary {
    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.05s;
 }
 
-button:hover { border-color: #c3c8d4; }
+button:hover:enabled { border-color: #c3c8d4; }
 button:active { transform: translateY(1px); }
 button:disabled { opacity: 0.45; cursor: default; transform: none; }
 
@@ -284,7 +284,9 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
    font-weight: 620;
 }
 
-.primary:hover { background-color: #2845e6; }
+/* A button out of reach answers nothing: lighting up under the pointer is the page
+   saying press me about a press it will not take. */
+.primary:hover:enabled { background-color: #2845e6; }
 
 /* The two ways in and the one button next to the link are choices, not asides: they carry
    the accent like everything else that acts. */
@@ -294,7 +296,7 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
    color: var(--accent-ink);
 }
 
-.pick:hover, #copyLink:hover { border-color: #2845e6; background-color: #2845e6; }
+.pick:hover:enabled, #copyLink:hover:enabled { border-color: #2845e6; background-color: #2845e6; }
 
 /* Wide enough for "Copied": the answer arrives under the pointer, so the button must not
    grow to give it. */
@@ -329,7 +331,12 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 
 /* The shorthand above drops the gradient the moment the pointer arrives, while the colour
    underneath is still transitioning in from nothing: the button blinks out and back. */
-.go:hover { background-image: linear-gradient(140deg, #2845e6, #5a3df0); }
+.go:hover:enabled { background-image: linear-gradient(140deg, #2845e6, #5a3df0); }
+
+/* The gradient above is a background shorthand, so it leaves no colour under itself:
+   with the image dropped for a disabled button, the label would sit on nothing and the
+   step out of reach would read as a gap in the page. */
+.go:disabled { background-color: var(--accent); }
 
 /* A drawn plane rather than a character: on this page emoji are what the two of them
    compare, and one used for decoration elsewhere blunts that. */
@@ -656,7 +663,7 @@ pre#secret {
       border-color: #64748b;
    }
    
-   button:hover { 
+   button:hover:enabled { 
       border-color: #cbd5e1;
       background: #475569; 
    }
@@ -667,12 +674,12 @@ pre#secret {
       color: var(--accent-ink); 
    }
    
-   .primary:hover, a.primary:hover { 
+   .primary:hover:enabled, a.primary:hover { 
       background-color: #a5b4fc; 
       border-color: #a5b4fc; 
    }
 
-   .pick:hover, #copyLink:hover { border-color: #a5b4fc; background-color: #a5b4fc; }
+   .pick:hover:enabled, #copyLink:hover:enabled { border-color: #a5b4fc; background-color: #a5b4fc; }
 
    .primary, .pick, #copyLink {
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), 0 2px 6px rgba(0, 0, 0, 0.5);

@@ -360,9 +360,6 @@ function render() {
    $("handQuote").hidden = wrote;
    $("composeHint").hidden = !!state.room;
 
-   // Once it is gone there is nothing left to take back, and the warning would be about
-   // a button nobody can press any more.
-   $("lastStep").hidden = state.sent;
 
    // Whoever writes inside the room verifies first and writes after, which is also
    // the order the blocks appear in.
@@ -374,6 +371,11 @@ function render() {
    settle(state.confirmed || ready, ready);
    $("continue").hidden = !!state.room;
    $("handover").disabled = state.sent || !ready || !secretInHand() || !secretFits();
+
+   // The warning belongs to the button, wherever the button is: what the press costs is
+   // worth knowing before it can be pressed. Once it is gone there is nothing left to
+   // take back, and the line would be about a button nobody can press any more.
+   $("lastStep").hidden = state.sent;
 
    $("secret-input").disabled = state.sent;
 
@@ -608,6 +610,11 @@ function wire() {
 
       const ready = state.last && state.last.state === "ready";
       $("handover").disabled = state.sent || !ready || !secretInHand() || !secretFits();
+
+   // The warning belongs to the button, wherever the button is: what the press costs is
+   // worth knowing before it can be pressed. Once it is gone there is nothing left to
+   // take back, and the line would be about a button nobody can press any more.
+   $("lastStep").hidden = state.sent;
       if (ready) atStep(secretInHand() ? "hand" : "write");
    };
 

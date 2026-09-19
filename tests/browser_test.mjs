@@ -171,10 +171,19 @@ async function main() {
       check("it opens on the first character and shuts again if the box is emptied",
          gate.opened === true && gate.shutAgain === true, JSON.stringify(gate));
 
+      // Nothing on this screen has mentioned a link or the symbols yet, so neither the
+      // hint nor the button may lean on something the reader has not met.
+      const firstHint = await sender.eval(
+         "(() => { const h = document.getElementById('composeHint');"
+         + " return h.hidden ? null : h.textContent.replace(/\\s+/g, ' ').trim(); })()");
+      check("the hint under the box speaks of what is on screen, not of symbols yet to come",
+         firstHint !== null && !/symbol/i.test(firstHint) && /link/i.test(firstHint),
+         String(firstHint));
+
       const continueLabel = await sender.eval(
          "document.getElementById('continue').textContent.replace(/\\s+/g, ' ').trim()");
       check("the button under the box names where it leads, not what it withholds",
-         continueLabel === "Continue to the link", continueLabel);
+         continueLabel === "Get the link to share", continueLabel);
       await sender.eval(`document.getElementById('secret-input').value = ${JSON.stringify(SECRET)};
          document.getElementById('compose').dispatchEvent(new Event('submit', { cancelable: true }))`);
 
@@ -311,9 +320,18 @@ async function main() {
          + " body: JSON.stringify({ id: location.pathname, token: 'x' }) }); return (await r.text()); })()");
       check("the server has nothing to show without a token", leakedToServer.includes("notfound"));
 
+      // Whoever wrote before sharing the link reaches the handover as a screen of its
+      // own, so here it is not on the symbols screen at all — and neither is the line
+      // about the last step, nor a gap where either of them would be.
       const drawnEarly = await sender.eval(
-         "document.getElementById('handover').offsetParent !== null");
-      check("no handover button is offered while it could not be pressed", drawnEarly === false);
+         "(() => { const h = document.querySelector('[data-view=handoff]');"
+         + " return { shown: document.getElementById('handover').offsetParent !== null,"
+         + "   room: h.getBoundingClientRect().height,"
+         + "   warned: document.getElementById('lastStep').offsetParent !== null }; })()");
+      check("no handover button is offered while it could not be pressed",
+         drawnEarly.shown === false, JSON.stringify(drawnEarly));
+      check("and it leaves no empty room under the symbols either",
+         drawnEarly.room === 0 && drawnEarly.warned === false, JSON.stringify(drawnEarly));
 
       const quietEarly = await sender.eval("document.title");
       check("and nothing claims it is the sender's turn before it is",
@@ -651,11 +669,52 @@ async function main() {
          + "   text: q ? q.textContent.replace(/\\s+/g, ' ').trim() : '' }; })()");
       check("the writer is shown the handover before it can be pressed",
          offeredEarly.shown && offeredEarly.locked, JSON.stringify(offeredEarly));
+
+      // The gradient is set through the background shorthand, which leaves no colour
+      // under it: drop the image for a disabled button and what is left is white on
+      // white — a gap under the symbols where a step out of reach should be.
+      const paintOf = "(() => { const c = getComputedStyle(document.getElementById('handover'));"
+         + " const alpha = (v) => { const m = v.match(/[\\d.]+/g); return m ? (m.length > 3 ? +m[3] : 1) : 0; };"
+         + " return { image: c.backgroundImage, colour: c.backgroundColor,"
+         + "   painted: c.backgroundImage !== 'none' || alpha(c.backgroundColor) > 0.1 }; })()";
+      const writerLockedPaint = await writer.eval(paintOf);
+      check("and drawn as a button while it waits, not as a gap under the symbols",
+         writerLockedPaint.painted === true, JSON.stringify(writerLockedPaint));
+
+      // Out of reach is not the same as pressable: the pointer must not repaint it.
+      const lockedSpot = await writer.eval(
+         "(() => { const b = document.getElementById('handover'); window.wasAt = window.scrollY;"
+         + " b.scrollIntoView({ block: 'center' });"
+         + " const r = b.getBoundingClientRect();"
+         + " return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()");
+      const restPaintInView = await writer.eval(paintOf);
+      await devtools.send("Input.dispatchMouseEvent",
+         { type: "mouseMoved", x: lockedSpot.x, y: lockedSpot.y }, writer.sessionId);
+      // The paint is under a transition, so read it once it has had time to change.
+      await sleep(400);
+      const hoveredPaint = await writer.eval(paintOf);
+      await devtools.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 }, writer.sessionId);
+      await writer.eval("window.scrollTo(0, window.wasAt)");
+      check("and does not light up under a pointer while it is out of reach",
+         hoveredPaint.image === restPaintInView.image && hoveredPaint.colour === restPaintInView.colour,
+         JSON.stringify(restPaintInView) + " -> " + JSON.stringify(hoveredPaint));
       check("with the promise quoted above it", offeredEarly.quoted === true);
       check("and the promise says both what holds it here and what pressing costs",
          /stays in this page/i.test(offeredEarly.text)
             && /only moment anything leaves your device/i.test(offeredEarly.text),
          offeredEarly.text);
+
+      // One screen from start to finish: what it ends with is on it from the beginning,
+      // the button and the line that says what pressing it costs.
+      const finalityHeld = await writer.eval(
+         "(() => { const h = document.getElementById('handover');"
+         + " const p = document.getElementById('lastStep');"
+         + " return { locked: h.disabled, warned: p.offsetParent !== null,"
+         + "   text: p.textContent.replace(/\\s+/g, ' ').trim() }; })()");
+      check("and the line under it says from the start what that press costs",
+         finalityHeld.locked === true && finalityHeld.warned === true
+            && /last step/i.test(finalityHeld.text) && /undone/i.test(finalityHeld.text),
+         JSON.stringify(finalityHeld));
 
       const hintNotRepeated = await writer.eval(
          "(() => { const h = document.querySelector('[data-view=compose] .hint');"
