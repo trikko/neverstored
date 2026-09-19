@@ -13,6 +13,14 @@
 # `caddy validate` warns that the directive is unnecessary, which it is.
 
 neverstored.example {
+	# Skip access logs for static assets, noisy API polling, and for privacy reasons do not log room names (/r/*)
+	@skip_log {
+		path /r/*
+		path /api/*
+		path *.css *.js *.svg *.png *.ico *.jpg *.jpeg *.gif *.webp *.woff *.woff2 *.ttf
+	}
+	log_skip @skip_log
+
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 	reverse_proxy localhost:8080
 }
