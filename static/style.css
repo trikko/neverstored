@@ -296,6 +296,10 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 
 .pick:hover, #copyLink:hover { border-color: #2845e6; background-color: #2845e6; }
 
+/* Wide enough for "Copied": the answer arrives under the pointer, so the button must not
+   grow to give it. */
+#copyLink { min-width: 6em; }
+
 /* Raised rather than decorated: the light along the top edge and the shadow under the
    bottom one are what a finger reads as pressable, and dropping both on :active is the
    press. Anything stronger than this stops looking like a surface and starts looking

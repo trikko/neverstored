@@ -171,10 +171,16 @@ async function main() {
       // Three buttons copy something; a button that answers "copied" next to one that
       // answers "Copied" reads as two different things happening.
       const copiedLink = await sender.eval(
-         "(() => { document.getElementById('copyLink').click();"
-         + " return document.getElementById('copyLink').textContent; })()");
-      check("copying the link says so the way every other button does", copiedLink === "Copied",
-         copiedLink);
+         "(() => { const b = document.getElementById('copyLink'); const before = b.offsetWidth;"
+         + " b.click();"
+         + " return { text: b.textContent, before, after: b.offsetWidth }; })()");
+      check("copying the link says so the way every other button does",
+         copiedLink.text === "Copied", copiedLink.text);
+
+      // The answer arrives under the pointer: a button that grows while saying it has
+      // moved the thing that was just clicked.
+      check("and the button keeps the size it was clicked at",
+         copiedLink.before === copiedLink.after, JSON.stringify(copiedLink));
 
       const pathHeld = await sender.eval(
          "[...document.querySelectorAll('#steps li')].map(n => n.textContent).join('|')");
