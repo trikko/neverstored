@@ -234,12 +234,44 @@ function freePort() {
    });
 }
 
+/* What every page was showing when a wait ran out. A timeout ends the whole run, so this is
+ * the only account of it anyone gets; without it the answer is a single line and the next
+ * person repeats the instrumenting by hand. The secret, the derived session, the tokens and
+ * any ciphertext are left out on purpose: a suite that proves the payload never reaches a log
+ * must not be the thing that writes it to one.
+ */
+const SNAPSHOT = `(() => {
+   const up = [...document.querySelectorAll("[data-view]")].filter((v) => !v.hidden)
+      .map((v) => v.dataset.view).join("+") || "-";
+   const at = document.querySelector("#steps li.at");
+   const s = typeof state === "undefined" ? null : state;
+   const last = s && s.last;
+
+   return JSON.stringify({
+      path: location.pathname,
+      views: up,
+      step: at ? at.textContent : "-",
+      status: document.getElementById("status").textContent,
+      state: s && { role: s.role, owner: s.owner, version: s.version, step: s.step,
+         sent: s.sent, confirmed: s.confirmed, peerSeen: s.peerSeen, finished: s.finished,
+         trouble: s.trouble, haveSecret: !!s.secret, haveSession: !!s.session,
+         expiresIn: s.expiresAt ? Math.round((s.expiresAt - Date.now()) / 1000) : null },
+      last: last && { ok: last.ok, err: last.err, state: last.state, ver: last.ver,
+         peer: last.peer, youConfirmed: last.youConfirmed, peerConfirmed: last.peerConfirmed,
+         delivered: last.delivered, carriedPayload: !!last.ct },
+   });
+})()`;
+
+let describeTabs = null;
+
 async function waitFor(check, what, tries = 120) {
    for (let i = 0; i < tries; i++) {
       const value = await check();
       if (value) return value;
       await sleep(250);
    }
+
+   if (describeTabs) console.error(await describeTabs());
    throw new Error("timed out waiting for " + what);
 }
 
@@ -298,8 +330,13 @@ async function main() {
       stdio: "ignore",
    });
 
+   // Every tab here is hidden, and Chrome throttles timers in hidden pages. The exchange runs
+   // on a timer, so the suite would be measuring that policy rather than the page. Turning it
+   // off removes the interference; it is not a diagnosis of any particular failure.
    const chrome = spawn("google-chrome", [
       "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+      "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
+      "--disable-renderer-backgrounding",
       "--user-data-dir=" + profile, "--remote-debugging-port=" + debugPort, "about:blank",
    ], { stdio: "ignore" });
 
@@ -330,6 +367,16 @@ async function main() {
          return tab;
       };
 
+      const open = [];
+      describeTabs = async () => {
+         const lines = ["   what the tabs were showing when the wait ran out:"];
+         for (const [i, tab] of open.entries()) {
+            try { lines.push("     " + i + " " + (await tab.eval(SNAPSHOT))); }
+            catch (error) { lines.push("     " + i + " unreadable: " + error.message); }
+         }
+         return lines.join("\n");
+      };
+
       const openTab = async (url, phone = false) => {
          const { targetId } = await devtools.send("Target.createTarget", { url });
          const { sessionId } = await devtools.send("Target.attachToTarget", { targetId, flatten: true });
@@ -341,6 +388,7 @@ async function main() {
          }
          const tab = new Tab(devtools, sessionId);
          await tab.eval("1");
+         open.push(tab);
          return tab;
       };
 
