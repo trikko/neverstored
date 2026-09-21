@@ -88,7 +88,7 @@ const show = (...ids) => {
    // Before a direction is chosen, and once the room is gone, there is no path to show —
    // and nothing for the status line to narrate either.
    const onAPath = !ids.some(id =>
-      ["chooser", "arrival", "gone", "expired", "occupied", "insecure"].includes(id));
+      ["chooser", "arrival", "gone", "expired", "occupied", "insecure", "unusable"].includes(id));
    $("steps").hidden = !onAPath;
    $("where").hidden = !onAPath;
    $("status").hidden = ids.includes("chooser") || ids.includes("arrival");
@@ -130,7 +130,8 @@ function drawExpiry() {
 
 /// The block steps back as soon as you are done with it, not when the other side is.
 function settle(done, both) {
-   $("confirm").disabled = done;
+   // Nothing to agree on until the symbols are derived, and no way to say you did.
+   $("confirm").disabled = done || !state.session;
    $("copySymbols").disabled = done;
    $("showDigits").disabled = done;
    document.querySelector("[data-view=verify]").classList.toggle("settled", done);
@@ -260,7 +261,20 @@ async function apply(reply) {
    state.last = reply;
 
    if (reply.peerPub && !state.session) {
-      state.session = await deriveSession(state.identity, reply.peerPub, state.room);
+      /* Everything the other side could honestly send derives a session: both clients make
+       * their key with the same curve, and a key that is not a point on it cannot be produced
+       * by accident. Treating the failure as a lost request, which it is not, used to leave
+       * the page complaining about the server and then drawing four empty symbols with a live
+       * confirm button — an invitation to agree on symbols nobody ever saw.
+       */
+      try { state.session = await deriveSession(state.identity, reply.peerPub, state.room); }
+      catch (error) {
+         // Said plainly on screen, where someone has to decide what to do, and precisely here,
+         // where whoever is looking into it wants the real reason.
+         console.warn("neverstored: the peer public key is not a valid P-256 point", error);
+         return finish("unusable")("Someone is tampering with this exchange.");
+      }
+
       drawSymbols();
    }
 

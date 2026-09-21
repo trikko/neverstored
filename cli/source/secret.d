@@ -142,6 +142,11 @@ ubyte[] unseal(ref Session session, string roomId, string payload)
    return plain[0 .. written + tail];
 }
 
+/// Unusable key material is not a glitch: no honest client can produce it.
+private enum tampered = "the other side answered with something no real neverstored client "
+   ~ "could have sent: someone is interfering with this exchange. Nothing was sent. Do not "
+   ~ "use this link again, and ask them for a new one somewhere you trust them";
+
 private ubyte[] agree(ref Identity self, string peerPub)
 {
    ubyte[] raw;
@@ -154,7 +159,7 @@ private ubyte[] agree(ref Identity self, string peerPub)
 
    enforce(EVP_PKEY_copy_parameters(peer, self.key) == 1, "cannot read the other key");
    enforce(EVP_PKEY_set1_encoded_public_key(peer, raw.ptr, raw.length) == 1,
-      "the other side sent a key that is not on the curve");
+      tampered);
 
    auto ctx = EVP_PKEY_CTX_new(self.key, null);
    enforce(ctx !is null, "cannot agree on a key");
@@ -162,7 +167,7 @@ private ubyte[] agree(ref Identity self, string peerPub)
 
    enforce(EVP_PKEY_derive_init(ctx) == 1, "cannot agree on a key");
    enforce(EVP_PKEY_derive_set_peer(ctx, peer) == 1,
-      "the other side sent a key that is not on the curve");
+      tampered);
 
    size_t length;
    enforce(EVP_PKEY_derive(ctx, null, &length) == 1 && length > 0, "cannot agree on a key");

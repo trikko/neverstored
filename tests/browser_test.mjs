@@ -59,7 +59,9 @@ const RENDER_PROBE = `(() => {
    for (const secret of ["none", "held", "typed"]) {
       Object.assign(state, {
          role, owner, confirmed, sent, finished: false,
-         room: "rrrrrrrr", token: "t", session: null, step: "",
+         // Every screen that draws symbols has derived them: a page that could not is
+         // finished before render() is ever asked to draw it.
+         room: "rrrrrrrr", token: "t", session: { symbols: [0, 1, 2, 3] }, step: "",
          secret: secret === "held" ? "s" : null,
          last: { state: said, ver: 1, role },
       });
@@ -1255,6 +1257,38 @@ async function main() {
          "the verdict on an invented link");
       check("an invented link says so only once it has been tried",
          /nothing|nowhere/i.test(nothingThere), nothingThere);
+
+      console.log("\n  a peer whose key cannot be used");
+
+      // Only a broken or hostile peer sends a key that is not a point on the curve, and the
+      // page used to treat the failure as a lost request: it complained about the server and
+      // then drew the verify screen with four empty tiles and a live confirm button. That is
+      // the worst possible screen at the one step that stops a stranger in the middle.
+      const bogus = await api("create", { flow: "send", pub: btoa("A".repeat(65)) });
+      const puzzled = await enterRoom(base + "/r/" + bogus.id);
+
+      const verdict = await waitFor(() => puzzled.eval(
+         "(() => { const s = document.querySelector('[data-view=unusable]');"
+         + " return s && !s.hidden ? (document.getElementById('status').textContent + ' '"
+         + " + s.textContent).replace(/\\s+/g, ' ').trim() : null; })()"), "the unusable-key screen");
+      check("a key this browser cannot use ends the exchange", verdict !== null, String(verdict));
+      check("and the server is not blamed for it",
+         !/trouble reaching|still trying/i.test(verdict), verdict);
+
+      // Nobody sends a key off the curve by accident, so the screen says what it looks like
+      // rather than filing it under "something went wrong".
+      check("and it is called what it is", /tamper|interfer/i.test(verdict), verdict);
+
+      // Whoever reads this screen is being told to stop and go somewhere else. Curves and
+      // keys are our vocabulary, not theirs, and a sentence they cannot parse reads as a
+      // glitch — which is exactly the wrong conclusion here.
+      check("and says it without jargon", !/curve|point|public key/i.test(verdict), verdict);
+
+      const offered = await puzzled.eval(
+         "!document.querySelector('[data-view=verify]').hidden");
+      check("the four symbols are never put on screen", offered === false);
+      check("and cannot be confirmed",
+         (await puzzled.eval("document.getElementById('confirm').disabled")) === true);
 
       console.log("\n  every screen render() can draw");
 

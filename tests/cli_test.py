@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The terminal client, end to end: two processes talking to each other."""
 
-import os, pty, re, select, shutil, signal, socket, subprocess, sys, tempfile, time
+import base64, json, os, pty, re, select, shutil, signal, socket, subprocess, sys, tempfile, time
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -257,6 +257,26 @@ def main():
         check("a secret past the limit is refused before it leaves", refused_size == 4,
               str(refused_size))
         check("and the refusal says why", b"not for files" in holder.err, holder.err.decode()[-200:])
+
+        print("\na key that cannot exist")
+
+        # Nobody sends a key off the curve by accident, and the page now says so outright.
+        # The terminal must not file the same thing under "something went wrong".
+        opened = urllib.request.urlopen(urllib.request.Request(
+            url + "/api/create", method="POST", headers={"content-type": "application/json"},
+            data=json.dumps({"flow": "send",
+                             "pub": base64.b64encode(b"A" * 65).decode()}).encode()), timeout=5)
+        forged = json.load(opened)
+
+        tampered = Client(url, ["open", url + "/r/" + forged["id"]])
+        code = tampered.finish()
+        told = tampered.err.decode()
+        check("the terminal refuses a key that is not on the curve", code != 0, str(code))
+        check("and says it is interference, not a glitch",
+              re.search(r"tamper|interfer", told, re.I) is not None, told.strip()[-200:])
+        check("and says it without jargon",
+              re.search(r"curve|point", told, re.I) is None, told.strip()[-200:])
+        check("and prints nothing to stdout", tampered.out == b"", repr(tampered.out[:80]))
 
         print("\non a real terminal")
 
