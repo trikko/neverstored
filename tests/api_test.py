@@ -219,6 +219,33 @@ def main():
         _, reply = call(port, "poll", {"id": room2, "token": "A" * 22, "v": 0})
         check("a room id without its token reveals nothing", reply.get("err") == "notfound")
 
+        print("\nspeculative requests")
+        # A browser that prefetches or prerenders a shared link says so. Honouring the join
+        # would hand the room to nobody and leave the recipient locked out of their own link.
+        speculator = "198.51.100.77"
+        for header, value in [("sec-purpose", "prefetch"), ("sec-purpose", "prefetch;prerender"),
+                              ("purpose", "prefetch"), ("x-purpose", "preview"), ("x-moz", "prefetch")]:
+            _, created = call(port, "create", {"flow": "send", "pub": base64.b64encode(b"A" * 65).decode()},
+                              ip=speculator)
+            room3 = created["id"]
+            _, reply = call(port, "join", {"id": room3, "pub": base64.b64encode(b"B" * 65).decode()},
+                            headers={"content-type": "application/json", header: value}, ip=speculator)
+            check("a join labelled %s: %s is refused" % (header, value),
+                  reply.get("err") == "speculative", str(reply))
+            _, reply = call(port, "join", {"id": room3, "pub": base64.b64encode(b"B" * 65).decode()},
+                            ip=speculator)
+            check("and the room is still there for the person who was sent the link",
+                  reply.get("ok") is True, str(reply))
+
+        _, reply = call(port, "create", {"flow": "send", "pub": base64.b64encode(b"A" * 65).decode()},
+                        headers={"content-type": "application/json", "sec-purpose": "prefetch"},
+                        ip=speculator)
+        check("a create is refused the same way", reply.get("err") == "speculative", str(reply))
+
+        status, _, _ = get(port, "/r/" + room3, ip=VISITOR)
+        check("the page itself is still served to a prefetch, since it takes no room",
+              status == 200, str(status))
+
         print("\nindistinguishability")
         _, burned = call(port, "poll", {"id": room, "token": "B" * 22, "v": 0})
         _, missing = call(port, "poll", {"id": "Z" * 22, "token": "B" * 22, "v": 0})

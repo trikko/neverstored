@@ -47,3 +47,25 @@ bool misconfigured(Request request)
 {
    return !noProxy() && forwardedFor(request).length == 0;
 }
+
+/+ Whether the browser is fetching this ahead of anyone asking for it.
+
+ + A prefetch or a prerender is the one bot-like request that announces itself honestly, each
+ + engine in its own spelling. A join made on its behalf would pair the room with nobody and
+ + leave the person the link was sent to locked out of it, so the announcement is taken at
+ + face value: a client that lies here is simply a client that did not prefetch.
++/
+bool speculative(Request request)
+{
+   import std.algorithm : canFind;
+   import std.uni : toLower;
+
+   foreach (name; ["sec-purpose", "purpose", "x-purpose", "x-moz"])
+   {
+      immutable value = request.header.read(name).toLower;
+      if (value.canFind("prefetch") || value.canFind("prerender") || value.canFind("preview"))
+         return true;
+   }
+
+   return false;
+}

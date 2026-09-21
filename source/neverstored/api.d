@@ -3,7 +3,7 @@ module neverstored.api;
 import neverstored.client;
 import neverstored.proto;
 import neverstored.room : maxPayloadBytes, wipe;
-import neverstored.visitor : forwardedFor, noProxy;
+import neverstored.visitor : forwardedFor, noProxy, speculative;
 
 import serverino;
 import std.json : JSONValue, JSONType, parseJSON;
@@ -24,6 +24,12 @@ void api(Request request, Output output)
    {
       output.status = 405;
       output ~= failure("method").toString();
+      return;
+   }
+
+   if (speculative(request))
+   {
+      output ~= failure("speculative").toString();
       return;
    }
 

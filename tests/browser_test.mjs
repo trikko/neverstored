@@ -1190,6 +1190,45 @@ async function main() {
       check("whoever arrived by link is told the same", /expired/i.test(guestExpiry.text), guestExpiry.text);
       check("but is not offered an exchange they cannot start", guestExpiry.again === false);
 
+      console.log("\n  a link opened before anyone asked");
+
+      // A prerender runs the page while the person is still reading the chat it was sent in.
+      // Joining then would pair the room with a guess the browser made and leave the person
+      // the link belongs to locked out of it. Chrome only prerenders on its own terms, so the
+      // state it exposes to the page is put there by hand and then released.
+      const api = async (op, body) => {
+         const response = await fetch(base + "/api/" + op, { method: "POST",
+            headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+         return response.json();
+      };
+
+      const untouched = await api("create", { flow: "send", pub: btoa("A".repeat(65)) });
+      const { targetId } = await devtools.send("Target.createTarget", { url: "about:blank" });
+      const speculated = await devtools.send("Target.attachToTarget", { targetId, flatten: true });
+      const ghost = new Tab(devtools, speculated.sessionId);
+      await devtools.send("Page.enable", {}, speculated.sessionId);
+      await devtools.send("Page.addScriptToEvaluateOnNewDocument", {
+         source: "window.__speculating = true;"
+            + " Object.defineProperty(document, 'prerendering',"
+            + " { configurable: true, get: () => window.__speculating });",
+      }, speculated.sessionId);
+      await devtools.send("Page.navigate", { url: base + "/r/" + untouched.id }, speculated.sessionId);
+      await waitFor(() => ghost.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"),
+         "the prerendered room page");
+      await sleep(500);
+
+      const beforeAnyone = await api("poll", { id: untouched.id, token: untouched.token, v: 0 });
+      check("a prerendered link leaves the room as it was",
+         beforeAnyone.state === "created", JSON.stringify(beforeAnyone));
+
+      await ghost.eval("window.__speculating = false;"
+         + " document.dispatchEvent(new Event('prerenderingchange')), 1");
+      const opened = await waitFor(async () => {
+         const said = await api("poll", { id: untouched.id, token: untouched.token, v: 0 });
+         return said.state === "paired" ? said : null;
+      }, "the room to pair once the page is really opened");
+      check("and joins the moment the person actually opens it", opened.state === "paired");
+
       console.log("\n  every screen render() can draw");
 
       // A net under the refactoring of render(), not a check of any one screen: it drives

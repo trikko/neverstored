@@ -545,7 +545,13 @@ function wire() {
    if (inRoom) {
       state.role = "receiver";
       paint({ views: ["waiting"], step: "open", status: "Opening…", spot: "from" });
-      joinRoom(location.pathname.slice(3));
+
+      // A prerendered page is the browser guessing, not someone opening the link. Taking the
+      // room now would leave whoever was sent it locked out of their own exchange.
+      if (document.prerendering)
+         document.addEventListener("prerenderingchange",
+            () => joinRoom(location.pathname.slice(3)), { once: true });
+      else joinRoom(location.pathname.slice(3));
    } else {
       paint({ views: ["chooser"], status: "Nothing has been sent yet." });
 
