@@ -318,6 +318,16 @@ async function main() {
 
       devtools = await new Devtools(version.webSocketDebuggerUrl).open();
 
+      // Every link but the ones under test is followed the way a person follows it.
+      const enterRoom = async (url, phone = false) => {
+         const tab = await openTab(url, phone);
+         await waitFor(() => tab.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"),
+            "the room page");
+         await waitFor(() => tab.eval("!!document.getElementById('arrive') || null"), "the arrival gate");
+         await tab.eval("document.getElementById('arrive').click(), 1");
+         return tab;
+      };
+
       const openTab = async (url, phone = false) => {
          const { targetId } = await devtools.send("Target.createTarget", { url });
          const { sessionId } = await devtools.send("Target.attachToTarget", { targetId, flatten: true });
@@ -457,7 +467,7 @@ async function main() {
          "the countdown to move");
       check("and counts it down rather than sitting there", ticking !== countdown, ticking);
 
-      const receiver = await openTab(link);
+      const receiver = await enterRoom(link);
       await waitFor(() => receiver.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the room page");
 
       // The tiles are drawn empty from the start, so wait for them to carry the words.
@@ -496,7 +506,7 @@ async function main() {
 
       // A full room is the one case where the page knows perfectly well what is going on,
       // so it must not fall back on the "we cannot tell the difference" screen.
-      const third = await openTab(link);
+      const third = await enterRoom(link);
       await waitFor(() => third.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the room page");
       const crowded = await waitFor(() => third.eval(
          "(() => { const s = document.querySelector('[data-view=occupied]');"
@@ -803,7 +813,7 @@ async function main() {
          senderDoneWording.includes("the shared link")
          && !/link you (shared|opened)/.test(senderDoneWording), senderDoneWording.trim());
 
-      const reopened = await openTab(link);
+      const reopened = await enterRoom(link);
       await waitFor(() => reopened.eval("document.readyState === 'complete'"), "the reopened link");
       await sleep(1500);
       const afterwards = await reopened.eval("document.getElementById('status').textContent");
@@ -836,6 +846,7 @@ async function main() {
       await waitFor(() => opening.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the app");
       const openingTrack = await opening.eval(
          "(() => { history.replaceState(null, '', '/r/' + 'x'.repeat(8)); wire();"
+         + " document.getElementById('arrive').click();"
          + " const dot = document.querySelector('#where b.lit');"
          + " return { status: document.getElementById('status').textContent,"
          + "   spot: dot ? dot.dataset.spot : null }; })()");
@@ -870,7 +881,7 @@ async function main() {
       check("the asker walks a path without a writing step",
          askerPath === "1Share|2Verify|3Receive", askerPath);
 
-      const writer = await openTab(askLink);
+      const writer = await enterRoom(askLink);
       await waitFor(() => writer.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the room page");
       await waitFor(() => writer.eval(
          "document.getElementById('secret-input').offsetParent !== null || null"), "the writing box");
@@ -1136,7 +1147,7 @@ async function main() {
          + " window.fetch = (url, opts) => (drop && String(url).includes('/api/poll'))"
          + "    ? (drop--, Promise.reject(new TypeError('Failed to fetch')))"
          + "    : real(url, opts); return true; })()");
-      await openTab(droppedLink);
+      await enterRoom(droppedLink);
       const afterDrop = await waitFor(() => symbolsOnScreen(dropped), "the sender past a lost request");
       check("a request that never lands does not end the exchange", typeof afterDrop === "string", String(afterDrop));
 
@@ -1149,7 +1160,7 @@ async function main() {
          "(() => { const real = window.alertPeerArrived; let boom = 1;"
          + " window.alertPeerArrived = () => { if (boom) { boom--; throw new TypeError('Illegal constructor'); }"
          + "    return real(); }; return true; })()");
-      await openTab(thrownLink);
+      await enterRoom(thrownLink);
       const afterThrow = await waitFor(() => symbolsOnScreen(thrown), "the sender past a throw mid-change");
       check("a throw while applying a change does not end it either",
          typeof afterThrow === "string", String(afterThrow));
@@ -1163,7 +1174,7 @@ async function main() {
          document.getElementById('compose').dispatchEvent(new Event('submit', { cancelable: true }))`);
       const doomed = await waitFor(() => owner.eval("document.getElementById('link').value || null"), "the link");
 
-      const guest = await openTab(doomed);
+      const guest = await enterRoom(doomed);
       await waitFor(() => guest.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the room page");
       await waitFor(() => guest.eval("state.peerSeen || null"), "the pairing");
 
@@ -1192,10 +1203,10 @@ async function main() {
 
       console.log("\n  a link opened before anyone asked");
 
-      // A prerender runs the page while the person is still reading the chat it was sent in.
-      // Joining then would pair the room with a guess the browser made and leave the person
-      // the link belongs to locked out of it. Chrome only prerenders on its own terms, so the
-      // state it exposes to the page is put there by hand and then released.
+      // Opening a link is the browser doing as it is told; being there is a person saying so.
+      // Until the button is pressed the room must be exactly as its owner left it, whoever or
+      // whatever loaded the page — a prefetch, a preview, a scanner, or someone who will read
+      // the chat in ten minutes.
       const api = async (op, body) => {
          const response = await fetch(base + "/api/" + op, { method: "POST",
             headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -1203,31 +1214,47 @@ async function main() {
       };
 
       const untouched = await api("create", { flow: "send", pub: btoa("A".repeat(65)) });
-      const { targetId } = await devtools.send("Target.createTarget", { url: "about:blank" });
-      const speculated = await devtools.send("Target.attachToTarget", { targetId, flatten: true });
-      const ghost = new Tab(devtools, speculated.sessionId);
-      await devtools.send("Page.enable", {}, speculated.sessionId);
-      await devtools.send("Page.addScriptToEvaluateOnNewDocument", {
-         source: "window.__speculating = true;"
-            + " Object.defineProperty(document, 'prerendering',"
-            + " { configurable: true, get: () => window.__speculating });",
-      }, speculated.sessionId);
-      await devtools.send("Page.navigate", { url: base + "/r/" + untouched.id }, speculated.sessionId);
-      await waitFor(() => ghost.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"),
-         "the prerendered room page");
-      await sleep(500);
+      const arriving = await openTab(base + "/r/" + untouched.id);
+      await waitFor(() => arriving.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"),
+         "the room page");
 
+      const gateText = await arriving.eval(
+         "(() => { const s = document.querySelector('[data-view=arrival]');"
+         + " return s && !s.hidden ? s.textContent.replace(/\\s+/g, ' ').trim() : null; })()");
+      check("a link asks before it joins", gateText !== null, String(gateText));
+
+      // What the screen is about is a room, and what the button does is go into it: the two
+      // words someone has to understand before pressing anything.
+      check("and says what the link is", /room/i.test(gateText || ""), String(gateText));
+      check("and the button says what pressing does",
+         /enter|join/i.test(await arriving.eval("document.getElementById('arrive').textContent")),
+         await arriving.eval("document.getElementById('arrive').textContent"));
+
+      // The page cannot know whether anyone is still on the other side, so it must not say so.
+      check("and does not promise someone is there",
+         gateText !== null && !/(someone|somebody) (has|is waiting|sent)/i.test(gateText), String(gateText));
+
+      await sleep(500);
       const beforeAnyone = await api("poll", { id: untouched.id, token: untouched.token, v: 0 });
-      check("a prerendered link leaves the room as it was",
+      check("the room is untouched until the button is pressed",
          beforeAnyone.state === "created", JSON.stringify(beforeAnyone));
 
-      await ghost.eval("window.__speculating = false;"
-         + " document.dispatchEvent(new Event('prerenderingchange')), 1");
+      await arriving.eval("document.getElementById('arrive').click(), 1");
       const opened = await waitFor(async () => {
          const said = await api("poll", { id: untouched.id, token: untouched.token, v: 0 });
          return said.state === "paired" ? said : null;
-      }, "the room to pair once the page is really opened");
-      check("and joins the moment the person actually opens it", opened.state === "paired");
+      }, "the room to pair once the button is pressed");
+      check("and joins the moment it is", opened.state === "paired");
+
+      // A link that leads nowhere looks the same until you press: the gate claims nothing it
+      // cannot back, and the answer comes from trying.
+      const nowhere = await enterRoom(base + "/r/" + "A".repeat(21) + "Q");
+      const nothingThere = await waitFor(() => nowhere.eval(
+         "(() => { const s = document.querySelector('[data-view=gone]');"
+         + " return s && !s.hidden ? document.getElementById('status').textContent : null; })()"),
+         "the verdict on an invented link");
+      check("an invented link says so only once it has been tried",
+         /nothing|nowhere/i.test(nothingThere), nothingThere);
 
       console.log("\n  every screen render() can draw");
 

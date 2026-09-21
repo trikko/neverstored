@@ -131,6 +131,8 @@ async function main() {
       check("the terminal prints a link the browser can open", link.startsWith(base + "/r/"), link);
 
       const page = await openTab(link);
+      await waitFor(() => page.eval("!!document.getElementById('arrive') || null"), "the arrival gate");
+      await page.eval("document.getElementById('arrive').click(), 1");
       const fromPage = await waitFor(() => pageSymbols(page), "the symbols in the page");
       const fromTerminal = await waitFor(() => terminal.symbols(), "the symbols in the terminal");
       check("terminal and browser show the same four symbols", fromPage === fromTerminal,

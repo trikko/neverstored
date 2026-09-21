@@ -87,10 +87,11 @@ const show = (...ids) => {
 
    // Before a direction is chosen, and once the room is gone, there is no path to show —
    // and nothing for the status line to narrate either.
-   const onAPath = !ids.some(id => ["chooser", "gone", "expired", "occupied", "insecure"].includes(id));
+   const onAPath = !ids.some(id =>
+      ["chooser", "arrival", "gone", "expired", "occupied", "insecure"].includes(id));
    $("steps").hidden = !onAPath;
    $("where").hidden = !onAPath;
-   $("status").hidden = ids.includes("chooser");
+   $("status").hidden = ids.includes("chooser") || ids.includes("arrival");
 
    drawSteps();
    drawTrack();
@@ -543,15 +544,21 @@ function wire() {
    const inRoom = location.pathname.startsWith("/r/");
 
    if (inRoom) {
-      state.role = "receiver";
-      paint({ views: ["waiting"], step: "open", status: "Opening…", spot: "from" });
+      const id = location.pathname.slice(3);
 
-      // A prerendered page is the browser guessing, not someone opening the link. Taking the
-      // room now would leave whoever was sent it locked out of their own exchange.
-      if (document.prerendering)
-         document.addEventListener("prerenderingchange",
-            () => joinRoom(location.pathname.slice(3)), { once: true });
-      else joinRoom(location.pathname.slice(3));
+      // Loading a link is the browser doing as it is told; pressing is a person saying they
+      // are there. A preview, a scanner or a prefetch would otherwise take the room away from
+      // whoever was sent it, and start the shortened deadlines running for nobody. Whether
+      // anyone is still on the other side is what pressing finds out, so the screen above
+      // promises nothing it cannot know.
+      paint({ views: ["arrival"], status: "" });
+
+      $("arrive").onclick = () => {
+         $("arrive").disabled = true;
+         state.role = "receiver";
+         paint({ views: ["waiting"], step: "open", status: "Opening…", spot: "from" });
+         joinRoom(id);
+      };
    } else {
       paint({ views: ["chooser"], status: "Nothing has been sent yet." });
 
