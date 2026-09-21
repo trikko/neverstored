@@ -3,6 +3,7 @@ module app;
 import neverstored.api;
 import neverstored.broker : startBroker;
 import neverstored.client : useBroker;
+import neverstored.operator : parseOperatorIni;
 import neverstored.rnd : isRoomId;
 import neverstored.visitor : misconfigured, noProxy;
 
@@ -19,6 +20,7 @@ static assert(__traits(compiles, import("operator.ini")),
 private immutable string OPERATOR_NAME;
 private immutable string OPERATOR_CONTACT;
 private immutable string OPERATOR_PRIVACY;
+private immutable string OPERATOR_ABUSE;
 private immutable string OPERATOR_EXPIRES;
 
 shared static this()
@@ -27,49 +29,8 @@ shared static this()
    OPERATOR_NAME    = cfg.name;
    OPERATOR_CONTACT = cfg.contact;
    OPERATOR_PRIVACY = cfg.privacy;
+   OPERATOR_ABUSE   = cfg.abuse;
    OPERATOR_EXPIRES = cfg.expires;
-}
-
-private struct OperatorConfig
-{
-   string name    = "Example Operator";
-   string contact = "security@example.com";
-   string privacy = "privacy@example.com";
-   string expires = defaultExpires();
-}
-
-// __DATE__ is "MMM DD YYYY", e.g. "Sep 15 2026"; bump the year by one.
-private string defaultExpires() pure
-{
-   import std.conv : to;
-   return (__DATE__[$ - 4 .. $].to!int + 1).to!string ~ "-01-01T00:00:00.000Z";
-}
-
-private OperatorConfig parseOperatorIni(string src) pure
-{
-   import std.string : lineSplitter, strip;
-   import std.algorithm : findSplit;
-
-   OperatorConfig cfg;
-   foreach (line; src.lineSplitter)
-   {
-      auto s = line.strip;
-      if (s.length == 0 || s[0] == '#') continue;
-      if (auto parts = s.findSplit("="))
-      {
-         immutable key = parts[0].strip;
-         immutable val = parts[2].strip;
-         switch (key)
-         {
-            case "name":    cfg.name    = val; break;
-            case "contact": cfg.contact = val; break;
-            case "privacy": cfg.privacy = val; break;
-            case "expires": cfg.expires = val; break;
-            default: break;
-         }
-      }
-   }
-   return cfg;
 }
 
 string brokerSocketPath()
@@ -168,6 +129,7 @@ private void complain(Request request)
 @endpoint @route!"/how-it-works" void how(Request request, Output output) { page(request, output, import("how.html"), "/how-it-works"); }
 @endpoint @route!"/cli" void cli(Request request, Output output) { page(request, output, import("cli.html"), "/cli"); }
 @endpoint @route!"/privacy" void privacyPolicy(Request request, Output output) { page(request, output, import("privacy.html"), "/privacy"); }
+@endpoint @route!"/terms" void terms(Request request, Output output) { page(request, output, import("terms.html"), "/terms"); }
 
 @endpoint @route!(r => r.path.length > 3 && r.path[0 .. 3] == "/r/")
 void room(Request request, Output output)
@@ -255,7 +217,9 @@ private void page(Request request, Output output, string body_, string canonical
       .replace("{{origin}}", origin(request))
       .replace("{{canonical}}", origin(request) ~ canonicalPath)
       .replace("{{operator_name}}", OPERATOR_NAME)
-      .replace("{{operator_privacy}}", OPERATOR_PRIVACY);
+      .replace("{{operator_privacy}}", OPERATOR_PRIVACY)
+      .replace("{{operator_contact}}", OPERATOR_CONTACT)
+      .replace("{{operator_abuse}}", OPERATOR_ABUSE);
 }
 
 private string origin(Request request)

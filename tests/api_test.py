@@ -322,6 +322,25 @@ def main():
             check("the source is linked from " + path,
                   b"https://github.com/trikko/neverstored" in page)
 
+        _, _, terms = get(port, "/terms")
+        check("the terms say the service carries no warranty",
+              b"without any warranty" in terms and b"senza alcuna garanzia" in terms)
+        check("and that the operator can neither read nor recover a secret",
+              b"cannot read" in terms and "non può leggere".encode() in terms)
+        check("and name the law they are read under",
+              b"Italian law" in terms and b"legge italiana" in terms)
+
+        for path in ("/", "/how-it-works", "/cli", "/privacy", "/terms"):
+            _, _, page = get(port, path)
+            check("the terms are linked from " + path, b'href="/terms"' in page)
+
+        for path in ("/privacy", "/terms"):
+            _, _, page = get(port, path)
+            check("no operator placeholder survives on " + path, b"{{operator" not in page)
+
+        _, _, sitemap = get(port, "/sitemap.xml")
+        check("the terms are in the sitemap", b"/terms</loc>" in sitemap)
+
         _, _, home = get(port, "/")
         check("leaving for the source opens a new tab, so an open room survives",
               b'href="https://github.com/trikko/neverstored" target="_blank"' in home)
