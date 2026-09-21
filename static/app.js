@@ -568,9 +568,13 @@ function wire() {
       paint({ views: ["arrival"], status: "" });
 
       $("arrive").onclick = () => {
+         // Whether there is a room to join is still unknown, and the waiting screen is written
+         // for someone who is already in one: on a link that leads nowhere it would say the
+         // secret is on the other person's device, which is false for as long as the round
+         // trip lasts. Staying put says the one thing that is true — the press happened.
          $("arrive").disabled = true;
+         $("arrive").textContent = "Opening…";
          state.role = "receiver";
-         paint({ views: ["waiting"], step: "open", status: "Opening…", spot: "from" });
          joinRoom(id);
       };
    } else {

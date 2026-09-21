@@ -840,21 +840,6 @@ async function main() {
       const noPathThere = await insecure.eval("document.getElementById('steps').hidden");
       check("and shows no path it cannot walk", noPathThere === true);
 
-      // The screen between opening a link and being let into the room lasts one round trip,
-      // and the track is the one thing on it that says where the secret is. Dark there reads
-      // as nowhere, on a page whose whole job is to say it is on the other device. Fired by
-      // hand because the real thing is gone before it can be read.
-      const opening = await openTab(base + "/");
-      await waitFor(() => opening.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the app");
-      const openingTrack = await opening.eval(
-         "(() => { history.replaceState(null, '', '/r/' + 'x'.repeat(8)); wire();"
-         + " document.getElementById('arrive').click();"
-         + " const dot = document.querySelector('#where b.lit');"
-         + " return { status: document.getElementById('status').textContent,"
-         + "   spot: dot ? dot.dataset.spot : null }; })()");
-      check("while the link is being opened, the track already points at the other device",
-         openingTrack.spot === "from", JSON.stringify(openingTrack));
-
       console.log("\n  asking someone else for a secret");
 
       const asker = await openTab(base + "/");
@@ -1247,6 +1232,31 @@ async function main() {
          return said.state === "paired" ? said : null;
       }, "the room to pair once the button is pressed");
       check("and joins the moment it is", opened.state === "paired");
+
+      // Between the press and the answer the page knows nothing new, so it must not draw the
+      // screen that says the secret is on the other person's device: on a link that leads
+      // nowhere that sentence is false, and on a slow connection it is not a flash. The join
+      // is held open here to look at the moment that would otherwise pass too quickly.
+      const pressed = await openTab(base + "/r/" + "B".repeat(21) + "Q");
+      await waitFor(() => pressed.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"),
+         "the room page");
+      await pressed.eval(
+         "(() => { const real = window.fetch;"
+         + " window.fetch = (url, opts) => String(url).includes('/api/join')"
+         + "    ? new Promise((done) => setTimeout(() => done(real(url, opts)), 2000))"
+         + "    : real(url, opts); return true; })()");
+      await pressed.eval("document.getElementById('arrive').click(), 1");
+      await sleep(400);
+
+      const waiting = await pressed.eval(
+         "(() => { const shown = (v) => !document.querySelector('[data-view=' + v + ']').hidden;"
+         + " const b = document.getElementById('arrive');"
+         + " return { arrival: shown('arrival'), waiting: shown('waiting'),"
+         + "   label: b.textContent, off: b.disabled }; })()");
+      check("while the join is in flight the page stays where it was",
+         waiting.arrival === true && waiting.waiting === false, JSON.stringify(waiting));
+      check("with the button saying what it is doing, and not pressable again",
+         /opening/i.test(waiting.label) && waiting.off === true, JSON.stringify(waiting));
 
       // A link that leads nowhere looks the same until you press: the gate claims nothing it
       // cannot back, and the answer comes from trying.
