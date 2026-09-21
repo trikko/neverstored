@@ -333,6 +333,11 @@ def main():
         status, _, _ = get(port, "/r/short")
         check("a malformed room id finds nothing", status == 404)
 
+        # Twenty-two characters of the right alphabet are not enough: the encoder can only
+        # ever end an id in one of four of them.
+        status, _, _ = get(port, "/r/" + "A" * 21 + "B")
+        check("an id the encoder could never produce finds nothing either", status == 404, str(status))
+
         print("\na local client that stalls")
 
         stalled = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

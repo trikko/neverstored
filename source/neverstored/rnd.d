@@ -50,6 +50,14 @@ bool isRoomId(string id) @safe pure
 {
    if (id.length != 22) return false;
 
+   /+ Sixteen bytes are 128 bits and twenty-two base64 characters hold 132, so the last four
+    + bits of the last character are always zero: a real id ends in one of four characters
+    + out of sixty-four. Refusing the rest turns fifteen invented links out of sixteen into
+    + a plain "nothing here", without asking the broker anything.
+   +/
+   immutable tail = id[$ - 1];
+   if (tail != 'A' && tail != 'Q' && tail != 'g' && tail != 'w') return false;
+
    foreach (c; id)
    {
       immutable bool allowed = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
@@ -69,4 +77,20 @@ unittest // ids outside the alphabet never reach the broker
    assert(!isRoomId("../../../../etc/passwd"));
    assert(!isRoomId("AAAAAAAAAAAAAAAAAAAAA."));
    assert(!isRoomId("AAAAAAAAAAAAAAAAAAAAAAA"));
+}
+
+unittest // the last character of sixteen random bytes carries two bits, not six
+{
+   import std.algorithm : all, canFind;
+
+   foreach (i; 0 .. 2000)
+      assert(isRoomId(randomToken()));
+
+   // A string the alphabet allows but the encoder can never produce is not a room id, and
+   // saying so costs nothing: fifteen invented links out of sixteen stop at the front door.
+   assert(!isRoomId("AAAAAAAAAAAAAAAAAAAAAB"));
+   assert(!isRoomId("sdflkjsdfsdflkjsdfsdfz"));
+
+   foreach (tail; "AQgw")
+      assert(isRoomId("AAAAAAAAAAAAAAAAAAAAA" ~ tail));
 }
