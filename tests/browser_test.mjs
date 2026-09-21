@@ -1168,7 +1168,13 @@ async function main() {
       // The shortest deadline is two minutes, too long to sit through here. What the page
       // actually decides on is a poll that finds no room once the deadline it was told has
       // passed, and that is what both tabs are put in front of.
-      const runOut = "state.expiresAt = Date.now() - 1000; state.token = 'x'.repeat(43); true";
+      /* A poll that was already in flight answers with the deadline the server still knows
+       * about, and every reply carries it: letting it land would push the deadline back into
+       * the future and turn "expired" into "gone", which is a different screen and a race the
+       * page never runs. The deadline is nailed down instead of merely set. */
+      const runOut = "state.token = 'x'.repeat(43);"
+         + " Object.defineProperty(state, 'expiresAt',"
+         + "   { value: Date.now() - 1000, writable: false, configurable: true }); true";
       const expiredScreen = (tab) => tab.eval(
          "(() => { const s = document.querySelector('[data-view=expired]');"
          + " if (s.hidden) return null;"
