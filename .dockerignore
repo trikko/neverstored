@@ -1,0 +1,7 @@
+.git
+neverstored
+cli/neverstored
+cli/probe
+.dub
+cli/.dub
+tests/__pycache__

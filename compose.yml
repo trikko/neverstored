@@ -1,0 +1,30 @@
+# Caddy in front, because the page needs a secure context: outside localhost, without
+# HTTPS, crypto.subtle is absent and nothing starts. Put your hostname in deploy/Caddyfile.compose
+# and your details in static/operator.ini before the first build.
+
+services:
+  neverstored:
+    build: .
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /run:mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # No NEVERSTORED_NO_PROXY here: caddy writes x-forwarded-for, which is what the
+    # visitor count is derived from. Setting it would count every visitor as one visitor.
+    expose: ["8080"]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [neverstored]
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile.compose:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

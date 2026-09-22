@@ -1,0 +1,5 @@
+# Replace with your hostname. Caddy gets the certificate on its own.
+neverstored.example.com {
+	# The service name from compose.yml, on its internal port. Leave it as it is.
+	reverse_proxy neverstored:8080
+}

@@ -105,6 +105,40 @@ Running with nothing in front, which is the line above and how the tests run, wa
 `NEVERSTORED_NO_PROXY=1`: the per-visitor limit goes away and only the ceiling of 10000
 rooms for the whole instance is left. It is meant for a laptop, not for a public address.
 
+### In a container
+
+`Dockerfile` and `compose.yml` are in the repository. The build stage compiles a binary
+linked statically against musl; the image that runs it is `scratch` and holds that binary
+and nothing else — no shell, no package manager, no libc to keep patched, 1.4 MB in total.
+
+```
+$EDITOR static/operator.ini       # who answers for this instance
+$EDITOR deploy/Caddyfile.compose  # your hostname
+docker compose up -d --build
+```
+
+The image is built rather than pulled, and that is deliberate: the operator details are
+compiled into the binary, so an image somebody else built names somebody else as the
+person to write to about abuse. A clone has no `static/operator.ini` — it is gitignored
+for the same reason — and the build falls back to the placeholders in
+`static/operator.ini.example`, which is why the first line above is not optional.
+
+TLS is not decoration here. Outside `localhost` a browser denies `crypto.subtle` to a page
+served over plain HTTP, so an instance reached at `http://192.168.1.10:8080` does not
+merely look insecure: it does not work. That is why `compose.yml` brings its own Caddy,
+which gets a certificate for the hostname you put in `deploy/Caddyfile.compose` and terminates
+TLS in front of a service that is never published on the host.
+
+For the same reason `NEVERSTORED_NO_PROXY` does not appear in `compose.yml`, and should
+not be added to it: Caddy sets `X-Forwarded-For`, and the variable would throw away the
+one thing that keeps a single visitor from opening every room on the instance.
+
+The container runs as uid 65534 with a read-only root filesystem, no capabilities and
+`no-new-privileges`; the internal socket lands in a tmpfs. If you already terminate TLS
+somewhere else, drop the `caddy` service and replace `expose` with a `ports` mapping on
+loopback — the proxy in front still has to pass `X-Forwarded-For` and still has to serve
+the instance over HTTPS.
+
 ## From the terminal
 
 You can download the latest pre-compiled binaries for Linux and macOS from the [latest release](https://github.com/trikko/neverstored/releases/latest).

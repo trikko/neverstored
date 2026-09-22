@@ -13,3 +13,11 @@ buildType "small" {
 	dflags "-L--gc-sections" platform="dmd"
 	postBuildCommands "test -f \"$DUB_TARGET_PATH/$DUB_TARGET_NAME\" && strip -s \"$DUB_TARGET_PATH/$DUB_TARGET_NAME\" || true" platform="posix"
 }
+
+# A binary that owes nothing to the image it runs in: musl, statically linked, so the
+# runtime stage can be scratch. Kept apart from "small" so the deploy build never moves.
+buildType "container" {
+	buildOptions "releaseMode" "optimize"
+	dflags "-Oz" "-static" "-linker=lld" "-L=--gc-sections" "-L=--icf=all" platform="ldc"
+	postBuildCommands "test -f \"$DUB_TARGET_PATH/$DUB_TARGET_NAME\" && strip -s \"$DUB_TARGET_PATH/$DUB_TARGET_NAME\" || true" platform="posix"
+}
