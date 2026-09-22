@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The terminal client, end to end: two processes talking to each other."""
 
-import base64, json, os, pty, re, select, shutil, signal, socket, subprocess, sys, tempfile, time
+import base64, hashlib, json, os, pty, re, select, shutil, signal, socket, subprocess, sys, tempfile, time
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -171,6 +171,8 @@ def main():
 
         check("the recipient exits cleanly", received == 0, str(received))
         check("the sender exits cleanly", sent == 0, str(sent))
+        check("and is told it was picked up, not that it was read",
+              b"Picked up by their device." in sender.err, sender.err.decode()[-200:])
         check("the secret arrives byte for byte", receiver.out.decode() == SECRET,
               repr(receiver.out.decode()[:80]))
         check("nothing but the secret goes to stdout", sender.out == b"", repr(sender.out[:80]))
@@ -262,13 +264,22 @@ def main():
 
         # Nobody sends a key off the curve by accident, and the page now says so outright.
         # The terminal must not file the same thing under "something went wrong".
-        opened = urllib.request.urlopen(urllib.request.Request(
-            url + "/api/create", method="POST", headers={"content-type": "application/json"},
-            data=json.dumps({"flow": "send",
-                             "pub": base64.b64encode(b"A" * 65).decode()}).encode()), timeout=5)
-        forged = json.load(opened)
+        def api(op, body):
+            return json.load(urllib.request.urlopen(urllib.request.Request(
+                url + "/api/" + op, method="POST", headers={"content-type": "application/json"},
+                data=json.dumps(body).encode()), timeout=5))
+
+        bogus = b"A" * 65
+        forged = api("create", {"flow": "send",
+                                "commit": base64.b64encode(hashlib.sha256(bogus).digest()).decode()})
 
         tampered = Client(url, ["open", url + "/r/" + forged["id"]])
+        for _ in range(100):
+            if api("poll", {"id": forged["id"], "token": forged["token"], "v": 0}).get("state") == "paired":
+                break
+            time.sleep(0.1)
+        api("reveal", {"id": forged["id"], "token": forged["token"],
+                       "pub": base64.b64encode(bogus).decode()})
         code = tampered.finish()
         told = tampered.err.decode()
         check("the terminal refuses a key that is not on the curve", code != 0, str(code))

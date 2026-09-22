@@ -47,6 +47,8 @@ struct Exchange
 
    private string id;
    private string token;
+   private string peerCommit;
+   private bool owner;
    private string role;
    private ulong ver;
 
@@ -70,7 +72,8 @@ struct Exchange
    {
       JSONValue request;
       request["flow"] = flow;
-      request["pub"] = self.pub;
+      request["commit"] = self.commit;
+      owner = true;
 
       auto reply = api.call("create", request);
       if (!reply.ok) return complain(reply);
@@ -110,6 +113,7 @@ struct Exchange
 
       id = room;
       token = reply.text("token");
+      peerCommit = reply.text("peerCommit");
       stderr.writeln("Connected. Waiting for the other side.");
 
       return loop();
@@ -194,8 +198,28 @@ struct Exchange
       auto peerPub = reply.text("peerPub");
       if (peerPub.length && !haveSession)
       {
+         // Whoever joined holds the promise made before they arrived; whoever opened the
+         // room hands its key over only now, having seen the other one.
+         if (!owner && !opens(peerCommit, peerPub))
+         {
+            stderr.writeln(tampered);
+            cancel();
+            return Exit.refused;
+         }
+
          session = deriveSession(self, peerPub, id);
          haveSession = true;
+
+         if (owner)
+         {
+            JSONValue request;
+            request["id"] = id;
+            request["token"] = token;
+            request["pub"] = self.pub;
+
+            auto revealed = api.call("reveal", request);
+            if (!revealed.ok) return complain(revealed);
+         }
 
          if (!agree()) return Exit.refused;
       }
@@ -203,7 +227,15 @@ struct Exchange
       auto ct = reply.text("ct");
       if (ct.length)
       {
-         auto plain = unseal(session, id, ct);
+         // Only a hand on the way can make a sealed payload fail to open once the symbols
+         // matched: that is interference, not an outage.
+         ubyte[] plain;
+         try plain = unseal(session, id, ct);
+         catch (Exception e)
+         {
+            stderr.writeln(e.msg);
+            return Exit.refused;
+         }
          scope (exit) wipe(plain);
 
          // The secret itself is the only thing on stdout, so a redirect holds exactly it.
@@ -232,7 +264,7 @@ struct Exchange
 
       if (reply.flag("delivered") && role == "sender")
       {
-         stderr.writeln("Delivered. The room is gone.");
+         stderr.writeln("Picked up by their device. The room is gone.");
          return Exit.done;
       }
 

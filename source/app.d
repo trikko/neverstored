@@ -3,6 +3,7 @@ module app;
 import neverstored.api;
 import neverstored.broker : startBroker;
 import neverstored.client : useBroker;
+import neverstored.memory : forbidDumps;
 import neverstored.operator : parseOperatorIni;
 import neverstored.rnd : isRoomId;
 import neverstored.visitor : misconfigured, noProxy;
@@ -67,8 +68,12 @@ string brokerSocketPath()
    startBroker(brokerSocketPath());
 }
 
+/// Ciphertext crosses every worker on its way to the broker. Locking a worker's memory is
+/// left to the broker alone: with MCL_FUTURE and a low RLIMIT_MEMLOCK, a worker's own
+/// allocations would start failing.
 @onWorkerStart void attachToBroker()
 {
+   forbidDumps();
    useBroker(brokerSocketPath());
 }
 

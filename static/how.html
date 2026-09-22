@@ -41,12 +41,16 @@
    <h2>Step by step</h2>
    <ol class="walk">
       <li><strong>Alice opens a room.</strong> Her browser creates a key pair on the spot.
-      Only the public half is sent to us, together with the request to open a room, and the
-      room is created in memory.</li>
+      Not even the public half is sent to us yet: only a fingerprint of it, which binds her to
+      that key without showing it. The room is created in memory.</li>
 
       <li><strong>Bob follows the link.</strong> His browser makes a key pair of its own and
-      sends us its public half. The room is now a pair, and each side is handed the other's
-      public key.</li>
+      sends us its public half, and is handed Alice's fingerprint. Only once Bob's key is in
+      the room does Alice's browser send its own public key, and Bob's browser checks it
+      against the fingerprint. The order matters: a server that held both keys before showing
+      either side anything could search for two keys of its own that make both screens show
+      the same symbols. With Alice's key bound in advance and revealed last, it has nothing to
+      search against.</li>
 
       <li><strong>The two browsers agree on a key.</strong> Holding their own private key and
       the other's public one, both work out the same shared secret — and that secret never

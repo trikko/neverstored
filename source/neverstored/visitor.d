@@ -25,6 +25,27 @@ string forwardedFor(Request request)
    return last;
 }
 
+/+ The unit a visitor is counted in.
+
+ + An IPv4 address is one, but an IPv6 host is handed a whole /64 and may speak from any
+ + address in it: counted one address at a time, a single visitor would fill the service. The
+ + prefix is written out in one canonical form, so two spellings of it are one visitor.
++/
+string networkOf(string ip)
+{
+   import std.format : format;
+   import std.socket : Internet6Address, SocketException;
+
+   ubyte[16] raw;
+   try raw = Internet6Address.parse(ip);
+   catch (SocketException) return ip;
+
+   immutable ubyte[12] mapped = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff];
+   if (raw[0 .. 12] == mapped[]) return format("%d.%d.%d.%d", raw[12], raw[13], raw[14], raw[15]);
+
+   return format("%(%02x%)/64", raw[0 .. 8]);
+}
+
 /// Set when the instance is knowingly run with no reverse proxy in front of it.
 bool noProxy()
 {
@@ -68,4 +89,21 @@ bool speculative(Request request)
    }
 
    return false;
+}
+
+unittest // one IPv6 visitor is a /64, not one of the addresses in it
+{
+   // Every home and every VPS is handed a whole /64: counting single addresses would give
+   // each visitor eighteen quintillion allowances, and a few hundred fill the service.
+   assert(networkOf("2001:db8:1:2::1") == networkOf("2001:db8:1:2:ffff:ffff:ffff:ffff"));
+   assert(networkOf("2001:db8:1:2::1") == networkOf("2001:0db8:0001:0002:0:0:0:7"),
+      "two spellings of one network were counted apart");
+   assert(networkOf("2001:db8:1:2::1") != networkOf("2001:db8:1:3::1"));
+
+   assert(networkOf("198.51.100.7") == "198.51.100.7");
+   assert(networkOf("198.51.100.7") != networkOf("198.51.100.8"));
+   assert(networkOf("::ffff:198.51.100.7") == "198.51.100.7",
+      "an IPv4 visitor seen through a dual stack socket became someone else");
+
+   assert(networkOf("not an address") == "not an address");
 }

@@ -17,7 +17,7 @@ const sandbox = createContext({
    atob: (s) => Buffer.from(s, "base64").toString("binary"),
 });
 runInContext(readFileSync(join(ROOT, "static", "crypto.js"), "utf8"), sandbox);
-const { createIdentity, deriveSession, seal, unseal } = sandbox;
+const { createIdentity, deriveSession, seal, unseal, commitmentOf } = sandbox;
 
 /// Starts the probe, hands its public key to `answer`, then feeds back whatever that
 /// returns and resolves with the probe's JSON result.
@@ -50,6 +50,14 @@ async function check(name, body) {
    try { await body(); console.log("  ok   " + name); }
    catch (error) { failures++; console.log("  FAIL " + name + ": " + error.message); }
 }
+
+await check("browser and terminal commit to a key the same way", async () => {
+   const browser = await createIdentity();
+   const answer = await probe([browser.pub, ROOM]);
+
+   assert.equal(answer.commit, await commitmentOf(answer.pub), "the browser cannot open the terminal's");
+   assert.equal(answer.peerCommit, browser.commit, "the terminal cannot open the browser's");
+});
 
 await check("browser and terminal derive the same four symbols", async () => {
    const browser = await createIdentity();

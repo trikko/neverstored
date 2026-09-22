@@ -16,6 +16,7 @@ struct Identity
 {
    private EVP_PKEY* key;
    string pub;
+   string commit;
 
    @disable this(this);
 
@@ -46,7 +47,28 @@ Identity createIdentity()
    scope (exit) OPENSSL_free(raw);
 
    self.pub = Base64.encode(raw[0 .. length]);
+   self.commit = commitmentOf(self.pub);
    return self;
+}
+
+/// Whoever opens a room sends only this at first, and its key once the other one is in:
+/// a server holding both keys before showing either side anything could grind a pair of
+/// its own until the symbols collide.
+string commitmentOf(string pub)
+{
+   import std.digest.sha : sha256Of;
+
+   ubyte[] raw;
+   try raw = Base64.decode(pub);
+   catch (Exception) return null;
+
+   return Base64.encode(sha256Of(raw)[]);
+}
+
+bool opens(string commit, string pub)
+{
+   auto made = commitmentOf(pub);
+   return commit.length > 0 && made.length == commit.length && made == commit;
 }
 
 /// The transcript pins the room and both public keys, so someone in the middle
@@ -143,7 +165,7 @@ ubyte[] unseal(ref Session session, string roomId, string payload)
 }
 
 /// Unusable key material is not a glitch: no honest client can produce it.
-private enum tampered = "the other side answered with something no real neverstored client "
+enum tampered = "the other side answered with something no real neverstored client "
    ~ "could have sent: someone is interfering with this exchange. Nothing was sent. Do not "
    ~ "use this link again, and ask them for a new one somewhere you trust them";
 

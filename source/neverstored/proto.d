@@ -1,6 +1,7 @@
 module neverstored.proto;
 
 import std.json : JSONValue, parseJSON;
+import neverstored.room : wipe;
 import std.socket : Socket;
 
 enum maxFrameBytes = 256 * 1024;
@@ -12,6 +13,8 @@ bool sendFrame(Socket sock, JSONValue value)
 
    auto body_ = cast(const(ubyte)[]) value.toString();
    if (body_.length > maxFrameBytes) return false;
+
+   scope (exit) wipe(cast(ubyte[]) body_);
 
    ubyte[4] header = nativeToBigEndian(cast(uint) body_.length);
    return writeAll(sock, header[]) && writeAll(sock, body_);
@@ -28,6 +31,7 @@ bool receiveFrame(Socket sock, out JSONValue value)
    if (length == 0 || length > maxFrameBytes) return false;
 
    auto body_ = new ubyte[length];
+   scope (exit) wipe(body_);
    if (!readAll(sock, body_)) return false;
 
    try value = parseJSON(cast(string) body_);
@@ -86,6 +90,22 @@ ulong readUlong(in JSONValue value, string key)
    return cast(ulong) found.integer;
 }
 
+/// Zeroes every string a message holds, once whatever it carried has been passed on. Only
+/// for a message that was parsed: every string in it is then a heap copy, while one built
+/// in code may hold a literal, and writing over a literal is a crash.
+void forget(ref JSONValue value) @trusted
+{
+   import std.json : JSONType;
+
+   switch (value.type)
+   {
+      case JSONType.string: wipe(cast(ubyte[]) value.str); break;
+      case JSONType.object: foreach (ref member; value.object) forget(member); break;
+      case JSONType.array: foreach (ref item; value.array) forget(item); break;
+      default: break;
+   }
+}
+
 JSONValue failure(string reason)
 {
    JSONValue out_;
@@ -109,4 +129,18 @@ unittest // a version survives being handed from the worker to the broker
    assert(parseJSON(`{"v": -1}`).readUlong("v") == 0);
    assert(parseJSON(`{"v": "7"}`).readUlong("v") == 0);
    assert(parseJSON(`{}`).readUlong("v") == 0);
+}
+
+unittest // a request or a reply that carried a payload is zeroed once it has been answered
+{
+   import std.json : parseJSON;
+
+   auto request = parseJSON(`{"op": "deliver", "ct": "c2VhbGVkIGJ5dGVz", "nested": {"x": ["abc"]}}`);
+   auto held = request["ct"].str;
+   auto deep = request["nested"]["x"][0].str;
+
+   forget(request);
+
+   foreach (c; held) assert(c == 0, "the ciphertext outlived the request");
+   foreach (c; deep) assert(c == 0, "a string inside an array was skipped");
 }

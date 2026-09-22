@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """HTTP surface, state machine and amnesia tests. Starts its own server."""
 
-import base64, json, os, re, shutil, signal, socket, subprocess, sys, tempfile, time
+import base64, hashlib, json, os, re, shutil, signal, socket, subprocess, sys, tempfile, time
 import urllib.error, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BINARY = os.path.join(ROOT, "neverstored")
 CANARY = base64.b64encode(b"CANARY-PAYLOAD-MUST-NEVER-BE-WRITTEN").decode()
+
+KEY_A = base64.b64encode(b"A" * 65).decode()
+COMMIT_A = base64.b64encode(hashlib.sha256(b"A" * 65).digest()).decode()
 
 failures = []
 
@@ -66,10 +69,11 @@ def wait_for(port):
 
 
 def exchange(port, ct=None, flow="send"):
-    _, created = call(port, "create", {"flow": flow, "pub": base64.b64encode(b"A" * 65).decode()})
+    _, created = call(port, "create", {"flow": flow, "commit": COMMIT_A})
     room, sender_token = created["id"], created["token"]
     _, joined = call(port, "join", {"id": room, "pub": base64.b64encode(b"B" * 65).decode()})
     receiver_token = joined["token"]
+    call(port, "reveal", {"id": room, "token": sender_token, "pub": KEY_A})
     call(port, "confirm", {"id": room, "token": sender_token})
     call(port, "confirm", {"id": room, "token": receiver_token})
     call(port, "deliver", {"id": room, "token": sender_token, "ct": ct or CANARY})
@@ -101,7 +105,7 @@ def check_rooms_die_with_daemon(env, workdir):
         server.kill()
         return "server did not start"
 
-    call(port, "create", {"flow": "send", "pub": base64.b64encode(b"A" * 65).decode()})
+    call(port, "create", {"flow": "send", "commit": COMMIT_A})
     survivors = children_of(server.pid)
 
     os.killpg(os.getpgid(server.pid), signal.SIGKILL)
@@ -137,8 +141,7 @@ def check_no_proxy_mode():
         if not wait_for(port):
             return "server did not start"
 
-        key = base64.b64encode(b"A" * 65).decode()
-        _, reply = call(port, "create", {"flow": "send", "pub": key}, ip=None)
+        _, reply = call(port, "create", {"flow": "send", "commit": COMMIT_A}, ip=None)
         check("with NEVERSTORED_NO_PROXY a bare request opens a room", reply.get("ok") is True,
               str(reply))
 
@@ -147,11 +150,21 @@ def check_no_proxy_mode():
 
         refused = False
         for _ in range(30):
-            _, reply = call(port, "create", {"flow": "send", "pub": key}, ip=None)
+            _, reply = call(port, "create", {"flow": "send", "commit": COMMIT_A}, ip=None)
             if reply.get("err") == "ratelimit":
                 refused = True
                 break
         check("and the per-visitor limit is gone with it", not refused)
+
+        # Ciphertext crosses the workers on its way to the broker. A process that is not
+        # dumpable has its /proc entries handed to root: nobody else can read its memory
+        # or get a core out of it, which is what the broker already promises for itself.
+        found = subprocess.run(["pgrep", "-f", r"worker \[daemon: %d\]" % server.pid],
+                               capture_output=True, text=True).stdout.split()
+        readable = [pid for pid in found if os.stat("/proc/%s/environ" % pid).st_uid != 0]
+        check("the workers are running", bool(found))
+        check("and their memory cannot be read by another process of the same user",
+              not readable, "%d of %d readable" % (len(readable), len(found)))
         return None
     finally:
         try:
@@ -201,10 +214,11 @@ def main():
         status, reply = call(port, "deliver", {"id": room, "token": sender, "ct": CANARY})
         check("a burned room accepts no further delivery", reply.get("ok") is False)
 
-        _, created = call(port, "create", {"flow": "send", "pub": base64.b64encode(b"A" * 65).decode()})
+        _, created = call(port, "create", {"flow": "send", "commit": COMMIT_A})
         room2, token2 = created["id"], created["token"]
         _, reply = call(port, "join", {"id": room2, "pub": base64.b64encode(b"B" * 65).decode()})
         joiner2 = reply["token"]
+        call(port, "reveal", {"id": room2, "token": token2, "pub": KEY_A})
         _, reply = call(port, "join", {"id": room2, "pub": base64.b64encode(b"C" * 65).decode()})
         check("a third participant is refused", reply.get("err") == "occupied")
 
@@ -219,13 +233,45 @@ def main():
         _, reply = call(port, "poll", {"id": room2, "token": "A" * 22, "v": 0})
         check("a room id without its token reveals nothing", reply.get("err") == "notfound")
 
+        print("\nthe creator's key comes last")
+        # A server holding both honest keys before either side has seen anything can grind
+        # two keys of its own until the four symbols collide. So the creator only commits,
+        # and its key reaches the room once the joiner's is already there.
+        _, reply = call(port, "create", {"flow": "send", "pub": KEY_A})
+        check("a room is not opened on a bare key", reply.get("err") == "badinput", str(reply))
+
+        _, created = call(port, "create", {"flow": "send", "commit": COMMIT_A})
+        room5, creator5 = created["id"], created["token"]
+        _, joined = call(port, "join", {"id": room5, "pub": base64.b64encode(b"B" * 65).decode()})
+        joiner5 = joined.get("token")
+        check("whoever joins is told what the creator committed to",
+              joined.get("peerCommit") == COMMIT_A, str(joined))
+
+        _, seen = call(port, "poll", {"id": room5, "token": joiner5, "v": 0})
+        check("and sees no key before the creator reveals it", "peerPub" not in seen, str(seen))
+
+        _, reply = call(port, "confirm", {"id": room5, "token": joiner5})
+        check("nothing can be confirmed before both keys are there", reply.get("ok") is False, str(reply))
+
+        _, reply = call(port, "reveal", {"id": room5, "token": joiner5, "pub": KEY_A})
+        check("only the creator reveals the creator's key", reply.get("ok") is False, str(reply))
+
+        _, reply = call(port, "reveal",
+                        {"id": room5, "token": creator5, "pub": base64.b64encode(b"C" * 65).decode()})
+        check("a key that does not open the commitment is refused", reply.get("ok") is False, str(reply))
+
+        _, reply = call(port, "reveal", {"id": room5, "token": creator5, "pub": KEY_A})
+        _, seen = call(port, "poll", {"id": room5, "token": joiner5, "v": 0})
+        check("the committed key goes through, and only then reaches the joiner",
+              reply.get("ok") is True and seen.get("peerPub") == KEY_A, "%s %s" % (reply, seen))
+
         print("\nspeculative requests")
         # A browser that prefetches or prerenders a shared link says so. Honouring the join
         # would hand the room to nobody and leave the recipient locked out of their own link.
         speculator = "198.51.100.77"
         for header, value in [("sec-purpose", "prefetch"), ("sec-purpose", "prefetch;prerender"),
                               ("purpose", "prefetch"), ("x-purpose", "preview"), ("x-moz", "prefetch")]:
-            _, created = call(port, "create", {"flow": "send", "pub": base64.b64encode(b"A" * 65).decode()},
+            _, created = call(port, "create", {"flow": "send", "commit": COMMIT_A},
                               ip=speculator)
             room3 = created["id"]
             _, reply = call(port, "join", {"id": room3, "pub": base64.b64encode(b"B" * 65).decode()},
@@ -237,7 +283,7 @@ def main():
             check("and the room is still there for the person who was sent the link",
                   reply.get("ok") is True, str(reply))
 
-        _, reply = call(port, "create", {"flow": "send", "pub": base64.b64encode(b"A" * 65).decode()},
+        _, reply = call(port, "create", {"flow": "send", "commit": COMMIT_A},
                         headers={"content-type": "application/json", "sec-purpose": "prefetch"},
                         ip=speculator)
         check("a create is refused the same way", reply.get("err") == "speculative", str(reply))
@@ -265,13 +311,17 @@ def main():
         status, _ = call(port, "create", None, raw=b"x" * (200 * 1024))
         check("an oversized body is refused", status in (413, 400))
 
-        _, reply = call(port, "create", {"flow": "send", "pub": "not base64 at all!!"})
-        check("a junk public key is refused", reply.get("ok") is False)
+        _, reply = call(port, "create", {"flow": "send", "commit": "not base64 at all!!"})
+        check("a junk commitment is refused", reply.get("ok") is False)
 
-        _, reply = call(port, "create", {"flow": "send", "pub": base64.b64encode(b"A" * 400).decode()})
-        check("an oversized public key is refused", reply.get("ok") is False)
+        _, reply = call(port, "create", {"flow": "send", "commit": base64.b64encode(b"A" * 31).decode()})
+        check("a commitment that is not a SHA-256 is refused", reply.get("ok") is False)
 
-        _, reply = call(port, "create", {"flow": "elsewhere", "pub": base64.b64encode(b"A" * 65).decode()})
+        _, created = call(port, "create", {"flow": "send", "commit": COMMIT_A})
+        _, reply = call(port, "join", {"id": created["id"], "pub": base64.b64encode(b"A" * 400).decode()})
+        check("an oversized public key is refused", reply.get("err") == "badinput", str(reply))
+
+        _, reply = call(port, "create", {"flow": "elsewhere", "commit": COMMIT_A})
         check("an unknown flow is refused", reply.get("ok") is False)
 
         # The cap is what stops the service being used as a file transfer, so check the
@@ -279,8 +329,9 @@ def main():
         LIMIT = 8 * 1024 + 64
 
         def ready_room():
-            _, created = call(port, "create", {"flow": "send", "pub": base64.b64encode(b"A" * 65).decode()})
+            _, created = call(port, "create", {"flow": "send", "commit": COMMIT_A})
             _, joined = call(port, "join", {"id": created["id"], "pub": base64.b64encode(b"B" * 65).decode()})
+            call(port, "reveal", {"id": created["id"], "token": created["token"], "pub": KEY_A})
             call(port, "confirm", {"id": created["id"], "token": created["token"]})
             call(port, "confirm", {"id": created["id"], "token": joined["token"]})
             return created["id"], created["token"]
@@ -363,7 +414,7 @@ def main():
         stalled.connect(os.path.join(workdir, "broker.sock"))
         stalled.send(b"\x00\x00\x04\x00")  # says a kilobyte is coming, then says nothing
 
-        _, reply = call(port, "create", {"flow": "send", "pub": base64.b64encode(b"A" * 65).decode()})
+        _, reply = call(port, "create", {"flow": "send", "commit": COMMIT_A})
         check("the service answers while a client holds a frame open", reply.get("ok") is True,
               str(reply))
 
@@ -380,7 +431,7 @@ def main():
             extra.connect(os.path.join(workdir, "broker.sock"))
             quiet.append(extra)
 
-        _, reply = call(port, "create", {"flow": "send", "pub": base64.b64encode(b"A" * 65).decode()})
+        _, reply = call(port, "create", {"flow": "send", "commit": COMMIT_A})
         check("and fifty idle connections change nothing", reply.get("ok") is True, str(reply))
         for extra in quiet:
             extra.close()
@@ -436,8 +487,7 @@ def main():
               "A" * 22 not in room_page.split("<body")[0])
 
         print("\nhow long the room has")
-        key = base64.b64encode(b"A" * 65).decode()
-        _, made = call(port, "create", {"flow": "send", "pub": key})
+        _, made = call(port, "create", {"flow": "send", "commit": COMMIT_A})
         _, first = call(port, "poll", {"id": made["id"], "token": made["token"], "v": 0})
         check("a poll says how long the room has left",
               0 < first.get("expiresIn", 0) <= 600, str(first.get("expiresIn")))
@@ -452,6 +502,7 @@ def main():
         check("the room shortens once someone is in it",
               paired["expiresIn"] < first["expiresIn"], str(paired.get("expiresIn")))
 
+        call(port, "reveal", {"id": made["id"], "token": made["token"], "pub": KEY_A})
         call(port, "confirm", {"id": made["id"], "token": made["token"]})
         call(port, "confirm", {"id": made["id"], "token": entered["token"]})
         _, armed = call(port, "poll", {"id": made["id"], "token": made["token"], "v": 0})
@@ -461,22 +512,35 @@ def main():
         print("\nrate limit")
         refused = False
         for _ in range(30):
-            _, reply = call(port, "create", {"flow": "send", "pub": key})
+            _, reply = call(port, "create", {"flow": "send", "commit": COMMIT_A})
             if reply.get("err") == "ratelimit":
                 refused = True
                 break
         check("one address cannot open unlimited rooms", refused)
 
-        _, reply = call(port, "create", {"flow": "send", "pub": key}, ip="198.51.100.9")
+        _, reply = call(port, "create", {"flow": "send", "commit": COMMIT_A}, ip="198.51.100.9")
         check("and cannot spend anybody else's allowance", reply.get("ok") is True, str(reply))
 
-        _, reply = call(port, "create", {"flow": "send", "pub": key},
+        _, reply = call(port, "create", {"flow": "send", "commit": COMMIT_A},
                         ip="203.0.113.1, " + VISITOR)
         check("a header the client wrote itself buys nothing: the last hop is the one counted",
               reply.get("err") == "ratelimit", str(reply))
 
+        # A single IPv6 host holds a whole /64: each of its addresses is the same visitor.
+        refused = False
+        for i in range(30):
+            _, reply = call(port, "create", {"flow": "send", "commit": COMMIT_A},
+                            ip="2001:db8:5:6::%x" % (i + 1))
+            if reply.get("err") == "ratelimit":
+                refused = True
+                break
+        check("an IPv6 visitor cannot buy allowances by changing address inside its /64", refused)
+
+        _, reply = call(port, "create", {"flow": "send", "commit": COMMIT_A}, ip="2001:db8:5:7::1")
+        check("while the next /64 is somebody else", reply.get("ok") is True, str(reply))
+
         print("\nmisconfigured proxy")
-        _, reply = call(port, "create", {"flow": "send", "pub": key}, ip=None)
+        _, reply = call(port, "create", {"flow": "send", "commit": COMMIT_A}, ip=None)
         check("no x-forwarded-for, no rooms", reply.get("err") == "misconfigured", str(reply))
 
         status, _, body = get(port, "/", ip=None)

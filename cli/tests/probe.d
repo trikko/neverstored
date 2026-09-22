@@ -27,6 +27,8 @@ int main(string[] args)
 
    JSONValue out_;
    out_["pub"] = self.pub;
+   out_["commit"] = self.commit;
+   out_["peerCommit"] = commitmentOf(args[1]);
    out_["symbols"] = [
       cast(int) session.symbols[0], cast(int) session.symbols[1],
       cast(int) session.symbols[2], cast(int) session.symbols[3],

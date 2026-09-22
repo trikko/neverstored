@@ -10,6 +10,8 @@ const state = {
    role: null,
    secret: null,
    identity: null,
+   peerCommit: null,
+   peerPub: null,
    session: null,
    version: 0,
    step: "",
@@ -250,6 +252,10 @@ async function poll() {
    }
 
    if (reply.changed) await apply(reply);
+   else if (state.peerPub && !state.session) {
+      if (!(await agreeOnKeys())) return;
+      render();
+   }
 
    const idle = !state.peerSeen;
    schedule(idle ? SLOW_POLL : FAST_POLL);
@@ -260,23 +266,8 @@ async function apply(reply) {
    state.role = reply.role;
    state.last = reply;
 
-   if (reply.peerPub && !state.session) {
-      /* Everything the other side could honestly send derives a session: both clients make
-       * their key with the same curve, and a key that is not a point on it cannot be produced
-       * by accident. Treating the failure as a lost request, which it is not, used to leave
-       * the page complaining about the server and then drawing four empty symbols with a live
-       * confirm button — an invitation to agree on symbols nobody ever saw.
-       */
-      try { state.session = await deriveSession(state.identity, reply.peerPub, state.room); }
-      catch (error) {
-         // Said plainly on screen, where someone has to decide what to do, and precisely here,
-         // where whoever is looking into it wants the real reason.
-         console.warn("neverstored: the peer public key is not a valid P-256 point", error);
-         return finish("unusable")("Someone is tampering with this exchange.");
-      }
-
-      drawSymbols();
-   }
+   if (reply.peerPub && !state.peerPub) state.peerPub = reply.peerPub;
+   if (!(await agreeOnKeys())) return;
 
    if (reply.peer && !state.peerSeen) {
       state.peerSeen = true;
@@ -297,13 +288,59 @@ async function apply(reply) {
 
    if (reply.delivered && state.role === "sender") {
       // The delivery gets the page to itself, mirroring the recipient's reveal screen.
-      return finish("done")("Delivered — it reached them. Nothing left to delete.");
+      return finish("done")("Picked up by their device. Nothing left to delete.");
    }
 
    if (reply.state === "burned")
       return finish("gone")("Nothing was ever sent. Start again when you are both online.");
 
    render();
+}
+
+/* Both keys, in the order that keeps the server from choosing either with the other in hand.
+ * Whoever joined checks the key against the promise made before they arrived; whoever opened
+ * the room hands its key over only now, having seen the other one. A reveal that fails throws,
+ * and the next poll comes back here whether or not anything changed. Returns false once the
+ * exchange is over. */
+async function agreeOnKeys() {
+   if (state.session || !state.peerPub) return true;
+
+   if (!state.owner && !(await opens(state.peerCommit, state.peerPub))) {
+      console.warn("neverstored: the creator's key is not the one it committed to");
+      finish("unusable")("Someone is tampering with this exchange.");
+      return false;
+   }
+
+   /* Everything the other side could honestly send derives a session: both clients make
+    * their key with the same curve, and a key that is not a point on it cannot be produced
+    * by accident. Treating the failure as a lost request, which it is not, used to leave
+    * the page complaining about the server and then drawing four empty symbols with a live
+    * confirm button — an invitation to agree on symbols nobody ever saw.
+    */
+   let session;
+   try { session = await deriveSession(state.identity, state.peerPub, state.room); }
+   catch (error) {
+      // Said plainly on screen, where someone has to decide what to do, and precisely here,
+      // where whoever is looking into it wants the real reason.
+      console.warn("neverstored: the peer public key is not a valid P-256 point", error);
+      finish("unusable")("Someone is tampering with this exchange.");
+      return false;
+   }
+
+   if (state.owner) {
+      const revealed = await post("reveal", { pub: state.identity.pub });
+      if (!revealed.ok) {
+         if (revealed.err === "notfound") {
+            finish("gone")("This room is gone. Nothing was left behind.");
+            return false;
+         }
+         throw new Error("the reveal did not go through: " + revealed.err);
+      }
+   }
+
+   state.session = session;
+   drawSymbols();
+   return true;
 }
 
 /// The two ways of holding the secret want opposite things here. Whoever wrote it
@@ -356,8 +393,10 @@ function render() {
    const writing = sending && state.owner === false;
 
    // While nobody is there, there is only the link. From the moment the other side
-   // arrives, every remaining stage is on screen at once, until the room is ready.
-   if (reply.state === "created") return paint({
+   // arrives, every remaining stage is on screen at once, until the room is ready. A guest
+   // is in a paired room before the creator has revealed its key, and until then has
+   // nothing to compare: it waits the way the creator does, not in front of empty tiles.
+   if (reply.state === "created" || !state.session) return paint({
       views: [state.owner ? "link" : "waiting"],
       step: state.owner ? "share" : "open",
       status: state.owner
@@ -482,7 +521,7 @@ async function createRoom(flow, secret) {
    const response = await fetch("/api/create", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ flow, pub: state.identity.pub }),
+      body: JSON.stringify({ flow, commit: state.identity.commit }),
    });
    const reply = await response.json();
 
@@ -536,6 +575,7 @@ async function joinRoom(id) {
    state.token = reply.token;
    state.version = 0;
    state.role = "receiver";
+   state.peerCommit = reply.peerCommit;
    paint({ views: ["waiting"], step: "open", status: "Connected. Waiting for the other side.", spot: "from" });
    guardUnload();
    tick();

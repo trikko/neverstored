@@ -7,6 +7,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 import assert from "node:assert/strict";
+import { createECDH, createHash } from "node:crypto";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SECRET = "hunter2-correct-horse-battery-staple";
@@ -821,10 +822,12 @@ async function main() {
       check("whoever receives is told the shared link leads nowhere",
          receiverEnding.includes("the shared link leads nowhere"), receiverEnding);
 
+      // The server knows their device took it, not that it was read: a reply lost on the way
+      // back is the one case where the two differ, and the sender must not be told more.
       const senderDone = await waitFor(() => sender.eval(
          "document.getElementById('status').textContent"
-         + " === 'Delivered — it reached them. Nothing left to delete.' || null"), "delivery");
-      check("the sender is told it went through", senderDone === true);
+         + " === 'Picked up by their device. Nothing left to delete.' || null"), "delivery");
+      check("the sender is told it was picked up, and nothing the server cannot know", senderDone === true);
 
       const senderSteps = await waitFor(async () => {
          const s = await stepState(sender);
@@ -1254,7 +1257,8 @@ async function main() {
          return response.json();
       };
 
-      const untouched = await api("create", { flow: "send", pub: btoa("A".repeat(65)) });
+      const commitOf = (pub) => createHash("sha256").update(Buffer.from(pub, "base64")).digest("base64");
+      const untouched = await api("create", { flow: "send", commit: commitOf(btoa("A".repeat(65))) });
       const arriving = await openTab(base + "/r/" + untouched.id);
       await waitFor(() => arriving.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"),
          "the room page");
@@ -1328,8 +1332,12 @@ async function main() {
       // page used to treat the failure as a lost request: it complained about the server and
       // then drew the verify screen with four empty tiles and a live confirm button. That is
       // the worst possible screen at the one step that stops a stranger in the middle.
-      const bogus = await api("create", { flow: "send", pub: btoa("A".repeat(65)) });
+      const offCurve = btoa("A".repeat(65));
+      const bogus = await api("create", { flow: "send", commit: commitOf(offCurve) });
       const puzzled = await enterRoom(base + "/r/" + bogus.id);
+      await waitFor(async () => (await api("poll", { id: bogus.id, token: bogus.token, v: 0 })).state === "paired"
+         || null, "the pairing");
+      await api("reveal", { id: bogus.id, token: bogus.token, pub: offCurve });
 
       const verdict = await waitFor(() => puzzled.eval(
          "(() => { const s = document.querySelector('[data-view=unusable]');"
@@ -1353,6 +1361,61 @@ async function main() {
       check("the four symbols are never put on screen", offered === false);
       check("and cannot be confirmed",
          (await puzzled.eval("document.getElementById('confirm').disabled")) === true);
+
+      console.log("\n  a key other than the one promised");
+
+      // The creator commits to its key before anyone joins, so a server that shows the joiner
+      // a different key has had the chance to pick it after seeing both honest ones: exactly
+      // what it needs to make two separate sessions land on the same symbols.
+      const promiser = await openTab(base + "/");
+      const promised = await startRoom(promiser);
+      const betrayed = await openTab(promised);
+      await waitFor(() => betrayed.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"),
+         "the room page");
+      await betrayed.eval(
+         "(() => { const real = window.fetch;"
+         + " window.fetch = async (url, opts) => { const r = await real(url, opts);"
+         + "    if (!String(url).includes('/api/join')) return r;"
+         + "    const body = await r.json(); body.peerCommit = btoa('X'.repeat(32));"
+         + "    return new Response(JSON.stringify(body)); }; return true; })()");
+      await betrayed.eval("document.getElementById('arrive').click(), 1");
+
+      const betrayal = await waitFor(() => betrayed.eval(
+         "(() => { const s = document.querySelector('[data-view=unusable]');"
+         + " return s && !s.hidden ? document.getElementById('status').textContent : null; })()"),
+         "the verdict on a broken promise");
+      check("a key the creator never committed to ends the exchange", /tamper|interfer/i.test(betrayal), betrayal);
+      check("and its symbols are never shown",
+         (await betrayed.eval("state.session === null && document.querySelector('[data-view=verify]').hidden")) === true);
+
+      console.log("\n  a guest waiting for the creator's key");
+
+      // The creator reveals its key only on its next poll after the guest arrives, which can
+      // be seconds away. Until then the guest has nothing to compare, so it waits exactly as
+      // the creator does: on a screen that says so, not in front of four empty tiles.
+      const creatorKey = createECDH("prime256v1");
+      creatorKey.generateKeys();
+      const held = await api("create", { flow: "send", commit: commitOf(creatorKey.getPublicKey("base64")) });
+      const early = await enterRoom(base + "/r/" + held.id);
+      await waitFor(async () => (await api("poll", { id: held.id, token: held.token, v: 0 })).state === "paired"
+         || null, "the pairing");
+      await waitFor(() => early.eval("state.last && state.last.state === 'paired' || null"), "the guest's first poll");
+
+      const beforeKey = await early.eval(
+         "(() => { const shown = (v) => !document.querySelector('[data-view=' + v + ']').hidden;"
+         + " return { verify: shown('verify'), waiting: shown('waiting'),"
+         + "   status: document.getElementById('status').textContent }; })()");
+      check("before the creator's key arrives the guest is not asked to compare anything",
+         beforeKey.verify === false && beforeKey.waiting === true, JSON.stringify(beforeKey));
+      check("and is told it is waiting", /waiting for the other side/i.test(beforeKey.status), beforeKey.status);
+
+      await api("reveal", { id: held.id, token: held.token, pub: creatorKey.getPublicKey("base64") });
+      const afterKey = await waitFor(() => early.eval(
+         "(() => { if (document.querySelector('[data-view=verify]').hidden) return null;"
+         + " return [...document.querySelectorAll('#symbols span em')].map(n => n.textContent); })()"),
+         "the verify screen");
+      check("and the verify screen arrives with its four symbols already in it",
+         afterKey.length === 4 && afterKey.every((word) => word.length > 0), JSON.stringify(afterKey));
 
       console.log("\n  every screen render() can draw");
 

@@ -15,7 +15,7 @@ const sandbox = createContext({
 });
 
 runInContext(readFileSync(join(here, "..", "static", "crypto.js"), "utf8"), sandbox);
-const { createIdentity, deriveSession, seal, unseal } = sandbox;
+const { createIdentity, deriveSession, seal, unseal, commitmentOf, opens } = sandbox;
 
 const ROOM = "IQxLFZiBUNSy6eI2BRUn9Q";
 let failures = 0;
@@ -103,6 +103,23 @@ await check("two rooms with fresh keys never share symbols by accident", async (
       seen.add(s.symbols.join(","));
    }
    assert.ok(seen.size > 35, "symbol space looks degenerate: " + seen.size);
+});
+
+await check("an identity commits to its own key, as a SHA-256 of the raw point", async () => {
+   const a = await createIdentity();
+   const expected = Buffer.from(await crypto.subtle.digest("SHA-256", Buffer.from(a.pub, "base64")))
+      .toString("base64");
+   assert.equal(a.commit, expected);
+   assert.equal(await commitmentOf(a.pub), expected);
+});
+
+await check("a commitment opens with the key it was made from, and no other", async () => {
+   const a = await createIdentity();
+   const b = await createIdentity();
+   assert.equal(await opens(a.commit, a.pub), true);
+   assert.equal(await opens(a.commit, b.pub), false);
+   assert.equal(await opens("", a.pub), false);
+   assert.equal(await opens(undefined, a.pub), false);
 });
 
 console.log(failures ? "\ncrypto: " + failures + " failing" : "\ncrypto: all good");

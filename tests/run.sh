@@ -31,3 +31,6 @@ node tests/interop_crypto_test.mjs
 
 printf "\n== terminal and browser together ==\n"
 node tests/interop_test.mjs
+
+printf "\n== a server in the middle ==\n"
+node tests/mitm_test.mjs

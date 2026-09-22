@@ -17,6 +17,7 @@ struct Broker
    private int[string] roomsPerBucket;
    private ubyte[32] bucketKey;
    private bool keyed;
+   private MonoTime lastSweep;
 
    /+ Addresses are counted, never kept.
 
@@ -50,6 +51,7 @@ struct Broker
          case "create": return create(request, now);
          case "join": return join(request, now);
          case "poll": return poll(request, now);
+         case "reveal": return reveal(request, now);
          case "confirm": return confirm(request, now);
          case "deliver": return deliver(request, now);
          case "cancel": return cancel(request, now);
@@ -65,6 +67,16 @@ struct Broker
          if (room.expired(now)) doomed ~= id;
 
       foreach (id; doomed) drop(id, now);
+   }
+
+   /// Every frame wakes the loop, and a sweep walks every room. Nothing expired is ever
+   /// served meanwhile, because every operation checks the deadline itself.
+   void sweepIfDue(MonoTime now)
+   {
+      if (lastSweep != MonoTime.init && now - lastSweep < 1.seconds) return;
+
+      lastSweep = now;
+      sweep(now);
    }
 
    size_t roomCount() const { return rooms.length; }
@@ -100,8 +112,10 @@ struct Broker
       if (bucket.length && roomsPerBucket.get(bucket, 0) >= maxRoomsPerVisitor)
          return failure("ratelimit");
 
-      ubyte[] pubKey;
-      if (!decodeKey(request.readString("pub"), pubKey)) return failure("badinput");
+      // Only a promise of the key: the key itself follows the joiner's, see Room.reveal.
+      ubyte[] commitment;
+      if (!decodeBase64(request.readString("commit"), commitmentBytes, commitment)
+         || commitment.length != commitmentBytes) return failure("badinput");
 
       immutable flowName = request.readString("flow");
       if (flowName != "send" && flowName != "request") return failure("badinput");
@@ -111,7 +125,7 @@ struct Broker
       room.flow = flowName == "send" ? Flow.send : Flow.request;
       room.state = State.created;
       room.tokens = [randomToken(), randomToken()];
-      room.pubKeys[Side.creator] = pubKey;
+      room.commitment = commitment;
       room.deadline = now + createdTimeout;
       room.creatorBucket = bucket;
 
@@ -144,7 +158,24 @@ struct Broker
       reply["token"] = room.tokens[Side.joiner];
       reply["side"] = "joiner";
       reply["ver"] = room.ver;
+      reply["peerCommit"] = encodeKey(room.commitment);
       return reply;
+   }
+
+   private JSONValue reveal(in JSONValue request, MonoTime now)
+   {
+      Side side;
+      auto room = authenticate(request, now, side);
+      if (room is null) return failure("notfound");
+
+      ubyte[] pubKey;
+      if (!decodeKey(request.readString("pub"), pubKey)) return failure("badinput");
+
+      immutable err = room.reveal(side, pubKey, now);
+      if (err == Err.badInput) return failure("badinput");
+      if (err != Err.ok) return failure("state");
+
+      return JSONValue(["ok": JSONValue(true), "ver": JSONValue(room.ver)]);
    }
 
    /+ How long the room has left, so neither client has to guess.
@@ -364,28 +395,32 @@ private void brokerLoop(string socketPath)
          if (!receiveFrame(client, request)) { client.close(); continue; }
 
          auto reply = broker.handle(request, now);
-         if (!sendFrame(client, reply)) { client.close(); continue; }
+         immutable sent = sendFrame(client, reply);
+
+         forget(request);
+         wipe(cast(ubyte[]) reply.readString("ct"));
+
+         if (!sent) { client.close(); continue; }
 
          alive ~= client;
       }
       clients = alive;
 
-      broker.sweep(now);
+      broker.sweepIfDue(now);
    }
 }
 
 /// Rooms live in this process now, so it must not be dumpable or swappable.
 private void harden() @trusted
 {
+   import neverstored.memory : forbidDumps;
+
+   forbidDumps();
+
    version (linux)
    {
-      import core.sys.linux.sys.prctl : prctl, PR_SET_DUMPABLE;
       import core.sys.posix.sys.mman : mlockall, MCL_CURRENT, MCL_FUTURE;
-      import core.sys.posix.sys.resource : rlimit, setrlimit, RLIMIT_CORE;
 
-      rlimit noCore = { 0, 0 };
-      setrlimit(RLIMIT_CORE, &noCore);
-      prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
       mlockall(MCL_CURRENT | MCL_FUTURE);
    }
 }
@@ -410,19 +445,20 @@ version (unittest)
       return request;
    }
 
+   private immutable string pub = "YSBwdWJsaWMga2V5";   // "a public key"
+   private immutable string commit = "C3NI+gOJcMSOwHzXO2JX857IEPYPFu5zti48biYQq8Y=";
+
    private string[2] readyRoom(ref Broker broker, MonoTime now)
    {
-      import std.base64 : Base64;
-
-      immutable pub = Base64.encode(cast(const(ubyte)[]) "a public key");
-
       auto created = broker.handle(
-         ask(["op": "create", "flow": "send", "pub": pub, "ip": "test"]), now);
+         ask(["op": "create", "flow": "send", "commit": commit, "ip": "test"]), now);
       immutable id = created["id"].str;
       immutable creator = created["token"].str;
 
       auto joined = broker.handle(ask(["op": "join", "id": id, "pub": pub]), now);
       immutable joiner = joined["token"].str;
+
+      broker.handle(ask(["op": "reveal", "id": id, "token": creator, "pub": pub]), now);
 
       broker.handle(ask(["op": "confirm", "id": id, "token": creator]), now);
       broker.handle(ask(["op": "confirm", "id": id, "token": joiner]), now);
@@ -479,11 +515,10 @@ unittest // visitors are counted apart, and one of them cannot spend everybody's
 
    Broker broker;
    immutable now = MonoTime.currTime;
-   immutable pub = Base64.encode(cast(const(ubyte)[]) "a public key");
 
    JSONValue open(string ip)
    {
-      return broker.handle(ask(["op": "create", "flow": "send", "pub": pub, "ip": ip]), now);
+      return broker.handle(ask(["op": "create", "flow": "send", "commit": commit, "ip": ip]), now);
    }
 
    foreach (i; 0 .. maxRoomsPerVisitor)
@@ -501,10 +536,9 @@ unittest // the address is counted, never kept: what a room holds cannot be read
 
    Broker broker;
    immutable now = MonoTime.currTime;
-   immutable pub = Base64.encode(cast(const(ubyte)[]) "a public key");
    immutable ip = "198.51.100.7";
 
-   auto created = broker.handle(ask(["op": "create", "flow": "send", "pub": pub, "ip": ip]), now);
+   auto created = broker.handle(ask(["op": "create", "flow": "send", "commit": commit, "ip": ip]), now);
    immutable kept = (created["id"].str in broker.rooms).creatorBucket;
 
    assert(kept.length, "the visitor was not counted at all");
@@ -523,10 +557,9 @@ unittest // with no address to count, only the global ceiling is left
 
    Broker broker;
    immutable now = MonoTime.currTime;
-   immutable pub = Base64.encode(cast(const(ubyte)[]) "a public key");
 
    foreach (i; 0 .. maxRoomsPerVisitor + 5)
-      assert(broker.handle(ask(["op": "create", "flow": "send", "pub": pub]), now)["ok"].type
+      assert(broker.handle(ask(["op": "create", "flow": "send", "commit": commit]), now)["ok"].type
          == JSONType.true_);
 
    assert(broker.roomCount == maxRoomsPerVisitor + 5);
@@ -539,10 +572,9 @@ unittest // the room says how long it has, and says less of it as the exchange m
 
    Broker broker;
    immutable now = MonoTime.currTime;
-   immutable pub = Base64.encode(cast(const(ubyte)[]) "a public key");
 
    auto created = broker.handle(
-      ask(["op": "create", "flow": "send", "pub": pub, "ip": "198.51.100.7"]), now);
+      ask(["op": "create", "flow": "send", "commit": commit, "ip": "198.51.100.7"]), now);
    immutable id = created["id"].str;
    immutable creator = created["token"].str;
 
@@ -564,6 +596,7 @@ unittest // the room says how long it has, and says less of it as the exchange m
 
    auto joined = broker.handle(ask(["op": "join", "id": id, "pub": pub]), now);
    assert(left(now) == pairedTimeout.total!"seconds", "pairing did not shorten the room");
+   broker.handle(ask(["op": "reveal", "id": id, "token": creator, "pub": pub]), now);
 
    broker.handle(ask(["op": "confirm", "id": id, "token": creator]), now);
    broker.handle(ask(["op": "confirm", "id": id, "token": joined["token"].str]), now);
@@ -579,4 +612,64 @@ unittest // the room says how long it has, and says less of it as the exchange m
 
    // Past the deadline there is nothing left to report on: the room is simply not there.
    assert(pollAt(0, now + readyTimeout).readString("err") == "notfound");
+}
+
+unittest // the joiner holds the commitment before the creator's key exists anywhere but its owner
+{
+   import std.json : JSONType;
+
+   Broker broker;
+   immutable now = MonoTime.currTime;
+
+   auto refused = broker.handle(ask(["op": "create", "flow": "send", "pub": pub, "ip": "x"]), now);
+   assert(refused.readString("err") == "badinput", "a room opened on a bare key");
+
+   auto created = broker.handle(ask(["op": "create", "flow": "send", "commit": commit, "ip": "x"]), now);
+   immutable id = created["id"].str;
+   immutable creator = created["token"].str;
+
+   auto joined = broker.handle(ask(["op": "join", "id": id, "pub": pub]), now);
+   assert(joined.readString("peerCommit") == commit, "the joiner was not told what to expect");
+   immutable joiner = joined["token"].str;
+
+   JSONValue look(string token)
+   {
+      JSONValue request;
+      request["op"] = "poll";
+      request["id"] = id;
+      request["token"] = token;
+      request["v"] = 0UL;
+      return broker.handle(request, now);
+   }
+
+   assert(look(creator).readString("peerPub") == pub, "the creator has nothing to reveal against");
+   assert(look(joiner).readString("peerPub") is null, "the joiner saw a key nobody revealed");
+
+   auto early = broker.handle(ask(["op": "reveal", "id": id, "token": joiner, "pub": pub]), now);
+   assert(early["ok"].type == JSONType.false_, "the joiner revealed on the creator's behalf");
+
+   auto revealed = broker.handle(ask(["op": "reveal", "id": id, "token": creator, "pub": pub]), now);
+   assert(revealed["ok"].type == JSONType.true_);
+   assert(look(joiner).readString("peerPub") == pub);
+}
+
+unittest // a busy loop does not walk every room on every frame, and still sweeps each second
+{
+   import core.time : msecs, seconds;
+
+   Broker broker;
+   immutable now = MonoTime.currTime;
+
+   readyRoom(broker, now);
+   immutable late = now + readyTimeout + 1.seconds;
+
+   broker.sweepIfDue(late);
+   assert(broker.roomCount == 0, "the first sweep was skipped");
+
+   readyRoom(broker, now);
+   broker.sweepIfDue(late + 500.msecs);
+   assert(broker.roomCount == 1, "a second walk over every room inside the same second");
+
+   broker.sweepIfDue(late + 1.seconds);
+   assert(broker.roomCount == 0, "an expired room outlived the next second");
 }

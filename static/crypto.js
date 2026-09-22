@@ -9,7 +9,19 @@ async function createIdentity() {
    const pair = await crypto.subtle.generateKey(
       { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
 
-   return { priv: pair.privateKey, pub: b64(await crypto.subtle.exportKey("raw", pair.publicKey)) };
+   const pub = b64(await crypto.subtle.exportKey("raw", pair.publicKey));
+   return { priv: pair.privateKey, pub, commit: await commitmentOf(pub) };
+}
+
+// Whoever opens a room sends only this at first, and its key once the other one is in:
+// a server holding both keys before showing either side anything could grind a pair of
+// its own until the symbols collide.
+async function commitmentOf(pub) {
+   return b64(await crypto.subtle.digest("SHA-256", unb64(pub)));
+}
+
+async function opens(commit, pub) {
+   return typeof commit === "string" && commit.length > 0 && (await commitmentOf(pub)) === commit;
 }
 
 // The transcript pins the room and both public keys, so someone in the middle

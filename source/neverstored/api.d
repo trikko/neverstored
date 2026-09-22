@@ -3,7 +3,7 @@ module neverstored.api;
 import neverstored.client;
 import neverstored.proto;
 import neverstored.room : maxPayloadBytes, wipe;
-import neverstored.visitor : forwardedFor, noProxy, speculative;
+import neverstored.visitor : forwardedFor, networkOf, noProxy, speculative;
 
 import serverino;
 import std.json : JSONValue, JSONType, parseJSON;
@@ -13,7 +13,7 @@ import std.json : JSONValue, JSONType, parseJSON;
 enum maxBodyBytes = 12 * 1024;
 
 @endpoint @route!(r => r.path == "/api/create" || r.path == "/api/join"
-   || r.path == "/api/poll" || r.path == "/api/confirm"
+   || r.path == "/api/poll" || r.path == "/api/reveal" || r.path == "/api/confirm"
    || r.path == "/api/deliver" || r.path == "/api/cancel")
 void api(Request request, Output output)
 {
@@ -69,10 +69,10 @@ void api(Request request, Output output)
          return;
       }
 
-      query["ip"] = who;
+      query["ip"] = networkOf(who);
    }
 
-   foreach (key; ["id", "token", "pub", "ct", "flow"])
+   foreach (key; ["id", "token", "pub", "commit", "ct", "flow"])
    {
       auto value = incoming.readString(key);
       if (value.length) query[key] = value;
@@ -85,4 +85,9 @@ void api(Request request, Output output)
 
    output ~= text;
    wipe(cast(ubyte[]) text);
+
+   // Both came out of a parser, so every string in them is a copy this worker owns.
+   forget(reply);
+   forget(incoming);
+   wipe(cast(ubyte[]) raw);
 }

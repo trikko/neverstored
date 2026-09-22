@@ -175,8 +175,9 @@ The client needs `libcrypto` and `libcurl`. Most systems already have them, but 
 
 Unit tests cover the room state machine and the symbol table. Beyond those, the suite
 checks the things the product actually promises: that illegal state transitions are
-refused; that a burned room is indistinguishable from one that never existed; that a man in
-the middle produces different symbols on the two screens; that a payload nobody collects is
+refused; that a burned room is indistinguishable from one that never existed; that a server
+in the middle, grinding keys of its own, cannot put the same symbols on the two screens; that a
+payload nobody collects is
 zeroed and forgotten; that the QR code reads back through an independent decoder; that a
 real browser exchange delivers exactly what was typed; that the terminal client and the
 browser derive the same four symbols and open each other's payloads — and, under `strace`,

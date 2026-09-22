@@ -25,6 +25,7 @@ enum Err : ubyte
 enum maxSecretBytes = 8 * 1024;
 enum maxPayloadBytes = maxSecretBytes + 64;
 enum maxPubKeyBytes = 256;
+enum commitmentBytes = 32;
 
 enum createdTimeout = 10.minutes;
 enum pairedTimeout = 5.minutes;
@@ -41,6 +42,7 @@ struct Room
 
    string[2] tokens;
    ubyte[][2] pubKeys;
+   ubyte[] commitment;
    bool[2] confirmed;
 
    ubyte[] payload;
@@ -80,9 +82,31 @@ struct Room
       return Err.ok;
    }
 
-   Err confirm(Side side, MonoTime now)
+   /+ The creator's key, arriving after the joiner's and bound to what was promised before.
+
+    + A server that held both honest keys before showing either side anything could grind
+    + two of its own until the symbols collide. Committed to up front and revealed only now,
+    + the creator's key is out of its reach by the time it has to pick the one the joiner sees.
+   +/
+   Err reveal(Side side, const(ubyte)[] pubKey, MonoTime now)
    {
       if (state != State.paired) return Err.wrongState;
+      if (side != Side.creator) return Err.notYourTurn;
+      if (pubKey.length == 0 || pubKey.length > maxPubKeyBytes) return Err.badInput;
+      if (!constantTimeEquals(cast(const(char)[]) commitmentOf(pubKey),
+         cast(const(char)[]) commitment)) return Err.badInput;
+
+      // A reveal whose answer was lost comes round again with the same key.
+      if (pubKeys[Side.creator].length) return Err.ok;
+
+      pubKeys[Side.creator] = pubKey.dup;
+      touch(pairedTimeout, now);
+      return Err.ok;
+   }
+
+   Err confirm(Side side, MonoTime now)
+   {
+      if (state != State.paired || pubKeys[Side.creator].length == 0) return Err.wrongState;
 
       confirmed[side] = true;
       if (confirmed[Side.creator] && confirmed[Side.joiner])
@@ -132,6 +156,13 @@ struct Room
    }
 }
 
+ubyte[] commitmentOf(const(ubyte)[] pubKey) @safe
+{
+   import std.digest.sha : sha256Of;
+
+   return sha256Of(pubKey).dup;
+}
+
 /// Overwrite a buffer so the compiler cannot elide the store.
 void wipe(ubyte[] buf) @trusted
 {
@@ -154,6 +185,15 @@ bool constantTimeEquals(const(char)[] a, const(char)[] b) @safe pure
 
 version (unittest)
 {
+   private immutable ubyte[] creatorKey = [1, 2, 3];
+
+   /// Both keys in the room: the joiner's first, then the creator's opening its commitment.
+   private void pair(ref Room r, MonoTime now, const(ubyte)[] joinerKey = [4])
+   {
+      assert(r.join(joinerKey, now) == Err.ok);
+      assert(r.reveal(Side.creator, creatorKey, now) == Err.ok);
+   }
+
    private Room makeRoom(Flow flow = Flow.send)
    {
       Room r;
@@ -161,7 +201,7 @@ version (unittest)
       r.flow = flow;
       r.state = State.created;
       r.tokens = ["a", "b"];
-      r.pubKeys[Side.creator] = [1, 2, 3];
+      r.commitment = commitmentOf(creatorKey);
       r.deadline = MonoTime.currTime + createdTimeout;
       return r;
    }
@@ -184,7 +224,7 @@ unittest // no delivery before both sides confirmed the symbols
    auto r = makeRoom();
 
    assert(r.deliver(Side.creator, [1], now) == Err.wrongState);
-   r.join([4], now);
+   pair(r, now);
    assert(r.deliver(Side.creator, [1], now) == Err.wrongState);
    r.confirm(Side.creator, now);
    assert(r.state == State.paired);
@@ -199,14 +239,14 @@ unittest // only the side holding the secret may deliver, in either flow
    auto now = MonoTime.currTime;
 
    auto send = makeRoom(Flow.send);
-   send.join([4], now);
+   pair(send, now);
    send.confirm(Side.creator, now);
    send.confirm(Side.joiner, now);
    assert(send.deliver(Side.joiner, [1], now) == Err.notYourTurn);
    assert(send.deliver(Side.creator, [1], now) == Err.ok);
 
    auto request = makeRoom(Flow.request);
-   request.join([4], now);
+   pair(request, now);
    request.confirm(Side.creator, now);
    request.confirm(Side.joiner, now);
    assert(request.deliver(Side.creator, [1], now) == Err.notYourTurn);
@@ -217,7 +257,7 @@ unittest // the payload is picked up once, by the recipient, and burns the room
 {
    auto now = MonoTime.currTime;
    auto r = makeRoom();
-   r.join([4], now);
+   pair(r, now);
    r.confirm(Side.creator, now);
    r.confirm(Side.joiner, now);
    r.deliver(Side.creator, [42], now);
@@ -235,7 +275,7 @@ unittest // a second delivery on the same room is refused
 {
    auto now = MonoTime.currTime;
    auto r = makeRoom();
-   r.join([4], now);
+   pair(r, now);
    r.confirm(Side.creator, now);
    r.confirm(Side.joiner, now);
 
@@ -247,7 +287,7 @@ unittest // oversized and empty payloads are refused
 {
    auto now = MonoTime.currTime;
    auto r = makeRoom();
-   r.join([4], now);
+   pair(r, now);
    r.confirm(Side.creator, now);
    r.confirm(Side.joiner, now);
 
@@ -270,7 +310,7 @@ unittest // joining a burned room is refused, and burning wipes the payload
 {
    auto now = MonoTime.currTime;
    auto r = makeRoom();
-   r.join([4], now);
+   pair(r, now);
    r.confirm(Side.creator, now);
    r.confirm(Side.joiner, now);
    r.deliver(Side.creator, [1, 2, 3], now);
@@ -288,7 +328,7 @@ unittest // every mutation moves the version, so conditional polls cannot miss a
    auto r = makeRoom();
    auto seen = r.ver;
 
-   r.join([4], now);
+   pair(r, now);
    assert(r.ver > seen);
    seen = r.ver;
    r.confirm(Side.creator, now);
@@ -307,7 +347,7 @@ unittest // deadlines shrink as the exchange becomes active
    auto r = makeRoom();
    assert(!r.expired(now));
 
-   r.join([4], now);
+   pair(r, now);
    assert(r.deadline == now + pairedTimeout);
    r.confirm(Side.creator, now);
    r.confirm(Side.joiner, now);
@@ -321,4 +361,61 @@ unittest
    assert(!constantTimeEquals("abc", "abd"));
    assert(!constantTimeEquals("abc", "ab"));
    assert(constantTimeEquals("", ""));
+}
+
+/+ The creator's key is the one a server in the middle would need early: holding both honest
+ + keys before showing either side anything, it could grind two keys of its own until the
+ + four symbols collide. So the creator only commits to its key, and the key itself enters
+ + the room after the joiner's, and only if it is the one committed to.
++/
+unittest // the creator's key comes after the joiner's, and must open the commitment
+{
+   auto now = MonoTime.currTime;
+   auto r = makeRoom();
+
+   assert(r.reveal(Side.creator, creatorKey, now) == Err.wrongState,
+      "the creator's key entered a room nobody had joined");
+
+   assert(r.join([4], now) == Err.ok);
+   assert(r.pubKeys[Side.creator].length == 0, "joining handed the creator's key over");
+
+   assert(r.reveal(Side.joiner, creatorKey, now) == Err.notYourTurn);
+   assert(r.reveal(Side.creator, [9, 9, 9], now) == Err.badInput,
+      "a key that does not open the commitment was taken");
+   assert(r.pubKeys[Side.creator].length == 0);
+
+   immutable before = r.ver;
+   assert(r.reveal(Side.creator, creatorKey, now) == Err.ok);
+   assert(r.pubKeys[Side.creator] == creatorKey);
+   assert(r.ver > before, "the joiner would never hear of the key");
+}
+
+unittest // a reveal whose answer was lost can be sent again, but cannot change the key
+{
+   auto now = MonoTime.currTime;
+   auto r = makeRoom();
+   pair(r, now);
+
+   immutable ver = r.ver;
+   assert(r.reveal(Side.creator, creatorKey, now) == Err.ok);
+   assert(r.ver == ver, "a repeated reveal looked like news");
+}
+
+unittest // nothing to confirm until both keys are in the room
+{
+   auto now = MonoTime.currTime;
+   auto r = makeRoom();
+   r.join([4], now);
+
+   assert(r.confirm(Side.joiner, now) == Err.wrongState,
+      "a symbol was confirmed before it could be computed");
+   assert(r.confirm(Side.creator, now) == Err.wrongState);
+}
+
+unittest // a commitment is a SHA-256, so it cannot be opened by anything but the key
+{
+   import std.digest.sha : sha256Of;
+
+   assert(commitmentOf(creatorKey) == sha256Of(creatorKey)[]);
+   assert(commitmentOf(creatorKey).length == commitmentBytes);
 }
