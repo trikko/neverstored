@@ -185,3 +185,11 @@ that nothing is ever opened for writing while a secret passes through, neither o
 server nor in the client.
 
 Built with [serverino](https://serverino.dev). MIT licensed.
+
+## Feedback & support
+Using neverstored? I'd love to hear how you use it, or what's missing.
+Write to me: the address is just **oss**, at the domain of [my website](https://andreafontana.it).
+
+neverstored is built in my spare time. If it's useful to you or your company,
+consider [sponsoring me on GitHub](https://github.com/sponsors/trikko)
+or [buying me a beer on PayPal](https://paypal.me/andreafontana) ❤️
