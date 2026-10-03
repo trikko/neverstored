@@ -546,8 +546,9 @@ async function main() {
       check("and towards the recipient",
          (await ends(receiver)) === "their device -> your device", await ends(receiver));
 
-      const litForReceiver = await receiver.eval(
-         "document.querySelector('#where b.lit').dataset.spot");
+      const litForReceiver = await waitFor(() => receiver.eval(
+         "(() => { const dot = document.querySelector('#where b.lit');"
+         + " return dot ? dot.dataset.spot : null; })()"), "a lit spot on the recipient's track");
       check("while waiting, the secret is shown on the other device",
          litForReceiver === "from", litForReceiver);
 
