@@ -1,9 +1,9 @@
 # Build your own image: the operator details are compiled in, so the instance you run
 # says who you are, not who we are. Edit static/operator.ini before building.
 
-FROM alpine:3.22 AS build
+FROM alpine:3.24 AS build
 
-RUN apk add --no-cache gcc musl-dev ldc dub lld llvm-libunwind-static binutils
+RUN apk add --no-cache gcc musl-dev ldc dub lld llvm-libunwind-static zlib-static binutils
 
 WORKDIR /src
 COPY . .
