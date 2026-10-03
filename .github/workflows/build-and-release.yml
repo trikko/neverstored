@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup D compiler
         uses: dlang-community/setup-dlang@v2.0.0
@@ -30,6 +30,13 @@ jobs:
       - name: Install OpenSSL (macOS)
         if: runner.os == 'macOS'
         run: brew install openssl
+
+      # A release goes out on every push, so at least the server's own tests must hold first.
+      - name: Unit tests (server)
+        if: runner.os == 'Linux'
+        run: |
+          cp -n static/operator.ini.example static/operator.ini
+          dub test --compiler=ldc2
 
       - name: Build CLI
         working-directory: ./cli
@@ -47,7 +54,7 @@ jobs:
           fi
 
       - name: Upload Temporary Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.os }}
           path: cli/neverstored-*
@@ -61,13 +68,13 @@ jobs:
       contents: write # Required to overwrite the release
     steps:
       - name: Download all binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: binaries
           merge-multiple: true
 
       - name: Publish to Continuous Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
           name: "Latest Commit Build"
