@@ -1317,6 +1317,44 @@ async function main() {
       check("with the button saying what it is doing, and not pressable again",
          /opening/i.test(waiting.label) && waiting.off === true, JSON.stringify(waiting));
 
+      // What an iPhone did on a mobile connection: the join landed, the other side was shown
+      // four symbols, and the answer never made it back, so the page sat on "Opening…" with
+      // the button held down for good. The join is not sent twice — it already succeeded, and
+      // a second one would be told the room is full — so the page can only say what happened.
+      const joinWithoutAnswer = async (answer) => {
+         const host = await openTab(base + "/");
+         const hostLink = await startRoom(host);
+         const guest = await openTab(hostLink);
+         await waitFor(() => guest.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"),
+            "the room page");
+         await guest.eval(
+            "(() => { const real = window.fetch;"
+            + " window.fetch = (url, opts) => String(url).includes('/api/join')"
+            + `    ? real(url, opts).then(${answer})`
+            + "    : real(url, opts); return true; })()");
+         await guest.eval("document.getElementById('arrive').click(), 1");
+
+         const landed = await waitFor(() => host.eval(
+            "document.title.includes('Someone is here') || null"), "the host to see someone arrive");
+         const told = await waitFor(() => guest.eval(
+            "(() => { const s = document.querySelector('[data-view=lost]');"
+            + " return s && !s.hidden ? { status: document.getElementById('status').textContent,"
+            + "   text: s.textContent.replace(/\\s+/g, ' ').trim() } : null; })()"),
+            "the page to admit the join went unanswered").catch(() => null);
+         return { landed, told };
+      };
+
+      const lost = await joinWithoutAnswer("() => { throw new TypeError('Load failed'); }");
+      check("a join whose answer is lost has still let them in", lost.landed === true);
+      check("and the page that sent it says the connection dropped, instead of holding the button",
+         lost.told !== null && /connection/i.test(lost.told.status), JSON.stringify(lost.told));
+      check("and says what to do: a new room, not this one again",
+         lost.told !== null && /new room/i.test(lost.told.text), JSON.stringify(lost.told));
+
+      const silent = await joinWithoutAnswer("() => new Promise(() => {})");
+      check("an answer that never comes is given up on as well",
+         silent.told !== null && /connection/i.test(silent.told.status), JSON.stringify(silent.told));
+
       // A link that leads nowhere looks the same until you press: the gate claims nothing it
       // cannot back, and the answer comes from trying.
       const nowhere = await enterRoom(base + "/r/" + "A".repeat(21) + "Q");

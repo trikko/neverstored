@@ -1,6 +1,7 @@
 const MAX_SECRET_BYTES = 8 * 1024;
 const FAST_POLL = 500;
 const SLOW_POLL = 3000;
+const JOIN_PATIENCE = 15000;
 
 const state = {
    poll: 0,
@@ -90,7 +91,7 @@ const show = (...ids) => {
    // Before a direction is chosen, and once the room is gone, there is no path to show —
    // and nothing for the status line to narrate either.
    const onAPath = !ids.some(id =>
-      ["chooser", "arrival", "gone", "expired", "occupied", "insecure", "unusable"].includes(id));
+      ["chooser", "arrival", "gone", "lost", "expired", "occupied", "insecure", "unusable"].includes(id));
    $("steps").hidden = !onAPath;
    $("where").hidden = !onAPath;
    $("status").hidden = ids.includes("chooser") || ids.includes("arrival");
@@ -553,12 +554,24 @@ async function joinRoom(id) {
    state.identity = await createIdentity();
    state.room = id;
 
-   const response = await fetch("/api/join", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, pub: state.identity.pub }),
-   });
-   const reply = await response.json();
+   // A join that went unanswered may well have landed, so it is never sent again: the room
+   // would call the person it just let in a third arrival. All that is left is to say so,
+   // and a mobile connection can hold a request open far longer than anyone will wait.
+   let reply;
+   try {
+      reply = await Promise.race([
+         fetch("/api/join", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ id, pub: state.identity.pub }),
+         }).then((response) => response.json()),
+         new Promise((_, giveUp) => setTimeout(() => giveUp(new Error("no answer")), JOIN_PATIENCE)),
+      ]);
+   } catch (error) {
+      console.warn("neverstored: the join went unanswered", error);
+      paint({ views: ["lost"], status: "The connection dropped before the room answered." });
+      return;
+   }
 
    if (!reply.ok) {
       // A full room is not a missing one: saying the link leads nowhere would be a lie the
