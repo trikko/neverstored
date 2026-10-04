@@ -27,7 +27,7 @@ Exit: 0 sent or received, 1 symbols refused or interference, 2 room gone or expi
 
 int main(string[] args)
 {
-   import core.stdc.signal : signal, SIGINT;
+   import tty : stopOnInterrupt;
 
    Options options;
    options.url = environment.get("NEVERSTORED_URL", options.url);
@@ -77,7 +77,7 @@ int main(string[] args)
       return Exit.misuse;
    }
 
-   signal(SIGINT, &onInterrupt);
+   stopOnInterrupt();
 
    try
    {

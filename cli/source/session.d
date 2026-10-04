@@ -38,6 +38,9 @@ struct Options
 private enum fastPoll = 500.msecs;
 private enum slowPoll = 3.seconds;
 
+/// Past the deadline the server last gave, the room is gone whether or not it can be asked.
+private enum deadlineSlack = 5.seconds;
+
 struct Exchange
 {
    private Api api;
@@ -57,6 +60,7 @@ struct Exchange
    private bool sent;
    private bool peerSeen;
    private bool expiryWarned;
+   private MonoTime roomDeadline;
 
    @disable this(this);
 
@@ -80,6 +84,7 @@ struct Exchange
 
       id = reply.text("id");
       token = reply.text("token");
+      roomDeadline = MonoTime.currTime + 30.seconds;
       announce();
 
       return loop();
@@ -114,6 +119,7 @@ struct Exchange
       id = room;
       token = reply.text("token");
       peerCommit = reply.text("peerCommit");
+      roomDeadline = MonoTime.currTime + 30.seconds;
       stderr.writeln("Connected. Waiting for the other side.");
 
       return loop();
@@ -137,7 +143,7 @@ struct Exchange
          request["token"] = token;
          request["v"] = ver;
 
-         auto reply = api.call("poll", request);
+         auto reply = persist("poll", request);
 
          if (!reply.ok)
          {
@@ -148,6 +154,9 @@ struct Exchange
             }
             return complain(reply);
          }
+
+         immutable left = reply.number("expiresIn");
+         if (left > 0) roomDeadline = MonoTime.currTime + left.seconds;
 
          warnIfExpiring(reply);
 
@@ -181,6 +190,41 @@ struct Exchange
 
       expiryWarned = true;
       stderr.writefln("Less than a minute left: this room expires in %d seconds.", left);
+   }
+
+   /+ A request that did not get through is sent again for as long as the room can still be
+    + there: the page does the same, and a moment in a tunnel is not the end of an exchange.
+    + Only what is safe to repeat comes through here. A repeated poll, reveal or confirm
+    + changes nothing; a repeated delivery is refused when the first one landed, and `unsure`
+    + is what lets the caller read that refusal for what it is.
+   +/
+   private JSONValue persist(string op, JSONValue request)
+   {
+      bool unsure;
+      return persist(op, request, unsure);
+   }
+
+   private JSONValue persist(string op, JSONValue request, out bool unsure)
+   {
+      bool warned;
+
+      while (true)
+      {
+         auto reply = api.call(op, request);
+         if (reply.errorOf != "network") return reply;
+
+         unsure = true;
+         if (MonoTime.currTime > roomDeadline + deadlineSlack) return reply;
+
+         if (!warned)
+         {
+            warned = true;
+            stderr.writeln("Trouble reaching the server. Still trying.");
+         }
+
+         Thread.sleep(1.seconds);
+         if (interrupted) return failure("interrupted");
+      }
    }
 
    /// Returns Exit.running while there is more to do.
@@ -217,11 +261,12 @@ struct Exchange
             request["token"] = token;
             request["pub"] = self.pub;
 
-            auto revealed = api.call("reveal", request);
+            auto revealed = persist("reveal", request);
             if (!revealed.ok) return complain(revealed);
          }
 
-         if (!agree()) return Exit.refused;
+         immutable agreed = agree();
+         if (agreed != Exit.running) return agreed;
       }
 
       auto ct = reply.text("ct");
@@ -273,6 +318,15 @@ struct Exchange
       if (state == "ready" && role == "sender" && !sent)
          return hand();
 
+      // Picking the payload up is what burns the room, so a burned room that says it was
+      // delivered, to the side that never saw it, lost it on the way here.
+      if (state == "burned" && reply.flag("delivered") && role == "receiver")
+      {
+         stderr.writeln("It was lost on the way here: the connection dropped after it left "
+            ~ "the room, and the room went with it. Ask them to send it again.");
+         return Exit.unreachable;
+      }
+
       if (state == "burned")
       {
          stderr.writeln("Nothing was sent. The room is gone.");
@@ -285,7 +339,7 @@ struct Exchange
       return Exit.running;
    }
 
-   private bool agree()
+   private Exit agree()
    {
       stderr.writeln();
       stderr.writeln("Do you both see these four?");
@@ -304,22 +358,41 @@ struct Exchange
          request["id"] = id;
          request["token"] = token;
 
-         auto reply = api.call("confirm", request);
-         if (reply.ok) return true;
+         // A confirmation that landed and lost its answer may have been the second one, and
+         // the room moved on to ready: the refusal of a repeat means it went through.
+         bool unsure;
+         auto reply = persist("confirm", request, unsure);
+         if (reply.ok || (unsure && reply.errorOf == "state")) return Exit.running;
+
+         if (reply.errorOf == "notfound")
+         {
+            stderr.writeln("That room is gone. Nothing was left behind.");
+            return Exit.gone;
+         }
 
          stderr.writeln("The confirmation did not go through.");
-         return false;
+         cancel();
+         return Exit.unreachable;
       }
 
-      stderr.writeln("Stopped. Nothing was sent.");
       cancel();
-      return false;
+
+      if (interrupted) return Exit.gone;
+
+      stderr.writeln("Stopped. Nothing was sent.");
+      return Exit.refused;
    }
 
    private Exit hand()
    {
       auto plain = readSecret(options.file);
       scope (exit) wipe(plain);
+
+      if (interrupted)
+      {
+         cancel();
+         return Exit.gone;
+      }
 
       if (plain.length == 0)
       {
@@ -343,10 +416,30 @@ struct Exchange
       request["token"] = token;
       request["ct"] = seal(session, id, plain);
 
-      auto reply = api.call("deliver", request);
-      if (!reply.ok)
+      bool unsure;
+      auto reply = persist("deliver", request, unsure);
+
+      // A delivery whose answer was lost and that landed anyway is refused the second time,
+      // because the room already holds one: that refusal is the answer the first one lost.
+      immutable landed = reply.ok || (unsure && reply.errorOf == "state");
+
+      if (!landed)
       {
+         if (reply.errorOf == "notfound")
+         {
+            stderr.writeln("That room is gone. Nothing was delivered.");
+            return Exit.gone;
+         }
+
+         if (reply.errorOf == "network")
+         {
+            stderr.writeln("The connection dropped while handing it over. It may have arrived "
+               ~ "anyway: ask them.");
+            return Exit.unreachable;
+         }
+
          stderr.writeln("It did not go through. Nothing was delivered.");
+         cancel();
          return Exit.unreachable;
       }
 
@@ -377,6 +470,8 @@ struct Exchange
       stderr.writeln("Waiting for the other side. Keep this running.");
    }
 
+   /// Said once, briefly, and even after Ctrl-C: the other side should hear that this one
+   /// left rather than wait for the room to run out.
    private void cancel()
    {
       if (id.length == 0 || token.length == 0) return;
@@ -384,12 +479,21 @@ struct Exchange
       JSONValue request;
       request["id"] = id;
       request["token"] = token;
-      api.call("cancel", request);
+      api.call("cancel", request, 3.seconds, false);
+
+      id = null;
    }
 
+   /// Every way out that is not the end of the exchange goes through here, and closes the
+   /// room on the way, so the other side is not left waiting for someone who has gone.
    private Exit complain(in JSONValue reply)
    {
       immutable reason = reply.errorOf;
+
+      cancel();
+
+      if (reason == "interrupted")
+         return Exit.gone;
 
       if (reason == "network")
          stderr.writeln("Cannot reach " ~ options.url ~ ".");
@@ -438,15 +542,6 @@ private ubyte[] readAll()
    }
 
    return all;
-}
-
-private __gshared bool interruptedFlag;
-
-bool interrupted() { return interruptedFlag; }
-
-extern (C) void onInterrupt(int) nothrow @nogc
-{
-   interruptedFlag = true;
 }
 
 unittest // the client is useful before it is configured

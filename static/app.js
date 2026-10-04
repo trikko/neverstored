@@ -2,6 +2,8 @@ const MAX_SECRET_BYTES = 8 * 1024;
 const FAST_POLL = 500;
 const SLOW_POLL = 3000;
 const JOIN_PATIENCE = 15000;
+const REQUEST_PATIENCE = 10000;
+const EXPIRY_SLACK = 5000;
 
 const state = {
    poll: 0,
@@ -24,6 +26,8 @@ const state = {
    announced: false,
    finished: false,
    expiresAt: 0,
+   unsure: false,
+   creating: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -91,7 +95,8 @@ const show = (...ids) => {
    // Before a direction is chosen, and once the room is gone, there is no path to show —
    // and nothing for the status line to narrate either.
    const onAPath = !ids.some(id =>
-      ["chooser", "arrival", "gone", "lost", "expired", "occupied", "insecure", "unusable"].includes(id));
+      ["chooser", "arrival", "gone", "lost", "dropped", "expired", "occupied", "insecure", "unusable"]
+         .includes(id));
    $("steps").hidden = !onAPath;
    $("where").hidden = !onAPath;
    $("status").hidden = ids.includes("chooser") || ids.includes("arrival");
@@ -148,11 +153,14 @@ function whereIsIt(spot) {
       dot.classList.toggle("lit", dot.dataset.spot === spot);
 }
 
+/// A phone that changes network leaves its requests on a connection nobody is at the other
+/// end of, and the browser would wait on them for minutes: every request has a deadline.
 async function post(op, extra) {
    const response = await fetch("/api/" + op, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(Object.assign({ id: state.room, token: state.token }, extra)),
+      signal: AbortSignal.timeout(REQUEST_PATIENCE),
    });
    return response.json();
 }
@@ -214,35 +222,45 @@ async function tick() {
       // loop ending, because only a poll can move the page — the room would expire with
       // nobody watching, in front of a screen that never changed.
       state.trouble++;
+
+      // Past the deadline the server last gave, the room is gone whether or not it can be
+      // reached to ask: still trying under a countdown that reads zero would never end.
+      if (state.expiresAt && Date.now() >= state.expiresAt + EXPIRY_SLACK) return expire();
+
       if (state.trouble >= 3) say("Trouble reaching the server. Still trying.");
       schedule(SLOW_POLL);
    }
 }
 
+function expire() {
+   // Only whoever opened the room is offered another one: the other side arrived through a
+   // link and has nothing to start again.
+   $("expiredAgain").hidden = !state.owner;
+   finish("expired")("This room expired before the secret was sent.");
+}
+
 async function poll() {
    const reply = await post("poll", { v: state.version });
-
-   // A poll that goes through takes the complaint off the screen, even when it carries
-   // no news: render() puts back whatever the page was saying before.
-   if (state.trouble) {
-      state.trouble = 0;
-      render();
-   }
 
    if (!reply.ok) {
       if (reply.err === "notfound") {
          // The room dies the same way for everyone on the server, and a stranger opening the
          // link cannot be told why. Whoever was inside it watched the countdown run out, so
          // telling them we cannot tell the difference would be a lie they just disproved.
-         // Only whoever opened the room is offered another one: the other side arrived
-         // through a link and has nothing to start again.
-         if (state.expiresAt && Date.now() >= state.expiresAt) {
-            $("expiredAgain").hidden = !state.owner;
-            return finish("expired")("This room expired before the secret was sent.");
-         }
+         if (state.expiresAt && Date.now() >= state.expiresAt) return expire();
          return finish("gone")("This room is gone. Nothing was left behind.");
       }
-      return schedule(SLOW_POLL);
+
+      // A server that answers only to say it cannot help is as much trouble as one that does
+      // not answer, and is counted the same way.
+      throw new Error("the server refused the poll: " + reply.err);
+   }
+
+   // A poll that goes through takes the complaint off the screen, even when it carries
+   // no news: render() puts back whatever the page was saying before.
+   if (state.trouble) {
+      state.trouble = 0;
+      render();
    }
 
    // Every reply carries it, changed or not, so the countdown is corrected on each poll
@@ -285,12 +303,27 @@ async function apply(reply) {
       callBack("Your turn");
    }
 
-   if (reply.ct) return reveal(await unseal(state.session, state.room, reply.ct));
+   if (reply.ct) {
+      // Once the symbols matched, only a hand on the way can make the payload fail to open.
+      // It has been picked up and the room is burned, so there is nothing to retry either.
+      let secret;
+      try { secret = await unseal(state.session, state.room, reply.ct); }
+      catch (error) {
+         console.warn("neverstored: the payload does not open with the agreed key", error);
+         return finish("unusable")("Someone is tampering with this exchange.");
+      }
+      return reveal(secret);
+   }
 
    if (reply.delivered && state.role === "sender") {
       // The delivery gets the page to itself, mirroring the recipient's reveal screen.
       return finish("done")("Picked up by their device. Nothing left to delete.");
    }
+
+   // Picking the payload up is what burns the room, so a burned room that says it was
+   // delivered, to the side that never saw it, lost it on the way here.
+   if (reply.state === "burned" && reply.delivered && state.role === "receiver")
+      return finish("dropped")("It was lost on the way here. Ask them to send it again.");
 
    if (reply.state === "burned")
       return finish("gone")("Nothing was ever sent. Start again when you are both online.");
@@ -517,16 +550,36 @@ function guardUnload() {
    window.onbeforeunload = () => state.finished ? null : "";
 }
 
+/// Never sent twice on its own: an answer that was lost may have opened a room, and a second
+/// one would be another. Pressing again is up to whoever is there.
 async function createRoom(flow, secret) {
-   state.identity = await createIdentity();
-   const response = await fetch("/api/create", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ flow, commit: state.identity.commit }),
-   });
-   const reply = await response.json();
+   if (state.creating) return;
+   state.creating = true;
 
-   if (!reply.ok) { say("The service is busy. Try again in a moment."); return; }
+   let reply;
+   try {
+      state.identity = await createIdentity();
+      const response = await fetch("/api/create", {
+         method: "POST",
+         headers: { "content-type": "application/json" },
+         body: JSON.stringify({ flow, commit: state.identity.commit }),
+         signal: AbortSignal.timeout(REQUEST_PATIENCE),
+      });
+      reply = await response.json();
+   } catch (error) {
+      console.warn("neverstored: no room was opened", error);
+      say("Cannot reach the service. Check the connection and try again.");
+      return;
+   } finally {
+      state.creating = false;
+   }
+
+   if (!reply.ok) {
+      say(reply.err === "ratelimit"
+         ? "Too many rooms opened from here. Try again shortly."
+         : "The service is busy. Try again in a moment.");
+      return;
+   }
 
    state.room = reply.id;
    state.token = reply.token;
@@ -664,7 +717,13 @@ function wire() {
 
    $("confirm").onclick = async () => {
       $("confirm").disabled = true;
-      const reply = await post("confirm", {});
+
+      // Saying yes twice changes nothing, so a confirmation that went missing is simply
+      // offered again. Held down instead, it waited for a change in the room, and when the
+      // other side had already confirmed there was none coming.
+      let reply;
+      try { reply = await post("confirm", {}); }
+      catch (error) { reply = { ok: false, err: "network" }; }
 
       // A refused confirmation must not look like a confirmed one, or both sides
       // end up waiting for each other with nothing left to press.
@@ -685,9 +744,23 @@ function wire() {
       whereIsIt("server");
 
       const secret = state.secret || $("secret-input").value;
-      const reply = await post("deliver", { ct: await seal(state.session, state.room, secret) });
 
-      if (!reply.ok) {
+      let reply;
+      try { reply = await post("deliver", { ct: await seal(state.session, state.room, secret) }); }
+      catch (error) {
+         // The request may have landed and only its answer been lost. Pressing again is safe:
+         // a room that already holds the secret refuses a second one, and says so.
+         state.unsure = true;
+         $("handover").disabled = false;
+         whereIsIt("from");
+         say("The connection dropped. It may have arrived: press Send again to make sure.");
+         return;
+      }
+
+      // That refusal is the answer the first press never got.
+      const landed = reply.ok || (state.unsure && reply.err === "state");
+
+      if (!landed) {
          $("handover").disabled = false;
          whereIsIt("from");
          say("It did not go through. Nothing was delivered, try again.");

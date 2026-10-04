@@ -16,7 +16,7 @@ bool confirm(string question)
       terminal.write(question ~ " ");
       terminal.flush();
 
-      auto answer = terminal.readln();
+      auto answer = readOrGiveUp(terminal);
       if (answer is null) return false;
 
       return answer.strip.toLower == "y" || answer.strip.toLower == "yes";
@@ -25,7 +25,7 @@ bool confirm(string question)
    stderr.write(question ~ " ");
    stderr.flush();
 
-   auto answer = stdin.readln();
+   auto answer = readOrGiveUp(stdin);
    if (answer is null) return false;
 
    return answer.strip.toLower == "y" || answer.strip.toLower == "yes";
@@ -61,8 +61,38 @@ string askSecret(string prompt)
    terminal.write(prompt ~ " ");
    terminal.flush();
 
-   auto line = terminal.readln();
+   auto line = readOrGiveUp(terminal);
    return line is null ? "" : line.chomp;
+}
+
+/// Ctrl-C ends a read that is waiting rather than restarting it, and the read reports that
+/// as an error: it is an answer nobody gave, the same as no answer at all.
+private string readOrGiveUp(File from)
+{
+   try return from.readln();
+   catch (Exception) return null;
+}
+
+private __gshared bool interruptedFlag;
+
+bool interrupted() { return interruptedFlag; }
+
+/// Installed without SA_RESTART, so Ctrl-C ends whatever the client is waiting on: a
+/// question on the terminal would otherwise sit there until somebody pressed enter.
+void stopOnInterrupt()
+{
+   import core.sys.posix.signal : sigaction, sigaction_t, sigemptyset, SIGINT;
+
+   sigaction_t action;
+   action.sa_handler = &onInterrupt;
+   sigemptyset(&action.sa_mask);
+   action.sa_flags = 0;
+   sigaction(SIGINT, &action, null);
+}
+
+private extern (C) void onInterrupt(int) nothrow @nogc
+{
+   interruptedFlag = true;
 }
 
 bool talkingToAPerson()

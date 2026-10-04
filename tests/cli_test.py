@@ -85,6 +85,74 @@ def link_from(client, timeout=15):
     return None
 
 
+class Proxy:
+    """Stands between one client and the server and loses things on request: a connection
+    that drops, a reply that never comes back, an answer the server did not give."""
+
+    def __init__(self, upstream_port):
+        import http.client, http.server, threading
+
+        proxy = self
+        self.down_until = 0.0
+        self.down_after = {}    # op -> seconds the connection stays down once op went through
+        self.lose = {}          # op -> how many replies to swallow after forwarding
+        self.lose_payload = 0   # polls carrying a ciphertext whose reply is swallowed
+        self.fake = {}          # op -> reply given instead of forwarding
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                op = self.path.rsplit("/", 1)[-1]
+                body = self.rfile.read(int(self.headers.get("content-length", 0)))
+
+                if time.time() < proxy.down_until:
+                    self.close_connection = True
+                    return
+
+                if op in proxy.fake:
+                    return self.answer(200, json.dumps(proxy.fake[op]).encode())
+
+                upstream = http.client.HTTPConnection("127.0.0.1", upstream_port, timeout=10)
+                upstream.request("POST", self.path, body, {"content-type": "application/json"})
+                response = upstream.getresponse()
+                status, reply = response.status, response.read()
+                upstream.close()
+
+                if op in proxy.down_after:
+                    proxy.down_until = time.time() + proxy.down_after.pop(op)
+
+                if proxy.lose.get(op, 0) > 0:
+                    proxy.lose[op] -= 1
+                    self.close_connection = True
+                    return
+
+                if op == "poll" and proxy.lose_payload > 0 and b'"ct"' in reply:
+                    proxy.lose_payload -= 1
+                    self.close_connection = True
+                    return
+
+                self.answer(status, reply)
+
+            def answer(self, status, reply):
+                self.send_response(status)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(reply)))
+                self.send_header("connection", "close")
+                self.end_headers()
+                self.wfile.write(reply)
+                self.close_connection = True
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = "http://127.0.0.1:%d" % self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
 def on_a_terminal(url, secret_file):
     """The interactive path: a person watching, answering on the terminal."""
     master, slave = pty.openpty()
@@ -288,6 +356,153 @@ def main():
         check("and says it without jargon",
               re.search(r"curve|point", told, re.I) is None, told.strip()[-200:])
         check("and prints nothing to stdout", tampered.out == b"", repr(tampered.out[:80]))
+
+        print("\na connection that misbehaves")
+
+        # A server that accepts and never answers is what a dead mobile link looks like from
+        # this side. Without a deadline of its own the client waits on curl's, which is minutes.
+        silent_server = socket.socket()
+        silent_server.bind(("127.0.0.1", 0))
+        silent_server.listen(16)
+        silent_url = "http://127.0.0.1:%d" % silent_server.getsockname()[1]
+
+        started = time.time()
+        hung = Client(silent_url, ["open", "AAAAAAAAAAAAAAAAAAAAAA"])
+        hung_code = hung.finish(timeout=60)
+        hung_for = time.time() - started
+        check("a server that never answers is given up on within half a minute",
+              hung_code == 3 and hung_for < 30, "exit %s after %.0fs" % (hung_code, hung_for))
+
+        started = time.time()
+        stopped = Client(silent_url, ["open", "AAAAAAAAAAAAAAAAAAAAAA"])
+        time.sleep(1)
+        stopped.process.send_signal(signal.SIGINT)
+        stopped_code = stopped.finish(timeout=60)
+        stopped_for = time.time() - started
+        check("Ctrl-C stops a request that is waiting for an answer",
+              stopped_for < 5, "exit %s after %.0fs" % (stopped_code, stopped_for))
+        check("and says the exchange is over, not that the service is down", stopped_code == 2,
+              str(stopped_code))
+        silent_server.close()
+
+        # The question about the symbols is a read on the terminal. Ctrl-C there used to be
+        # swallowed, because the read simply started over, until someone pressed enter.
+        master, slave = pty.openpty()
+        prompted = subprocess.Popen([CLI, "send", "--file", pizza_file, "--no-qr"],
+                                    env=dict(os.environ, NEVERSTORED_URL=url),
+                                    stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+        os.close(slave)
+        seen = b""
+        other = None
+        deadline = time.time() + 20
+        while time.time() < deadline and b"They match" not in seen:
+            if select.select([master], [], [], 0.3)[0]:
+                try:
+                    seen += os.read(master, 65536)
+                except OSError:
+                    break
+            found = re.search(rb"http://\S+/r/[A-Za-z0-9_-]{22}", seen)
+            if found and other is None:
+                other = Client(url, ["open", found.group().decode()], answer="")
+
+        prompted.send_signal(signal.SIGINT)
+        try:
+            prompted_code = prompted.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            prompted.kill()
+            prompted_code = None
+        os.close(master)
+        check("Ctrl-C at the question about the symbols ends the exchange",
+              prompted_code is not None, seen.decode("utf-8", "replace")[-200:])
+        if other is not None:
+            other.finish(timeout=10)
+
+        # A moment without a connection is a moment, not the end of the exchange: the page
+        # keeps trying, and so must the terminal.
+        blip = Proxy(port)
+        blip.down_after["join"] = 4
+        sender = Client(url, ["send", "--file", secret_file])
+        link = link_from(sender)
+        patient = Client(blip.url, ["open", link])
+        patient_code = patient.finish(timeout=60)
+        sender.finish(timeout=10)
+        blip.close()
+        check("a few seconds without a connection do not end the exchange",
+              patient_code == 0 and patient.out.decode() == SECRET,
+              "exit %s: %s" % (patient_code, patient.err.decode()[-200:]))
+
+        # A delivery that landed and whose answer was lost is a secret that will arrive. The
+        # sender used to say nothing was delivered, while the other side was reading it.
+        lossy = Proxy(port)
+        lossy.lose["deliver"] = 1
+        sender = Client(lossy.url, ["send", "--file", secret_file])
+        link = link_from(sender)
+        receiver = Client(url, ["open", link])
+        received = receiver.finish(timeout=30)
+        sent = sender.finish(timeout=30)
+        lossy.close()
+        check("the secret still arrives when the sender never hears back",
+              received == 0 and receiver.out.decode() == SECRET, str(received))
+        check("and the sender does not claim it was not delivered",
+              b"Nothing was delivered" not in sender.err, sender.err.decode()[-200:])
+        check("but waits to see it picked up", sent == 0, "exit %s: %s" % (sent, sender.err.decode()[-200:]))
+
+        # The poll that carries the ciphertext burns the room. Its answer lost, the secret is
+        # gone, and calling that "nothing was sent" would be a lie the sender can disprove.
+        robbed = Proxy(port)
+        robbed.lose_payload = 1
+        sender = Client(url, ["send", "--file", secret_file])
+        link = link_from(sender)
+        receiver = Client(robbed.url, ["open", link])
+        robbed_code = receiver.finish(timeout=30)
+        sender.finish(timeout=30)
+        robbed.close()
+        told = receiver.err.decode()
+        check("a secret lost on its way here is not reported as never sent",
+              "Nothing was sent" not in told and re.search(r"lost", told) is not None,
+              told.strip()[-200:])
+        check("and does not exit as if it had arrived", robbed_code not in (0, None), str(robbed_code))
+
+        # The second confirmation is the one that makes the room ready. Its answer lost, the
+        # repeat is refused because there is nothing left to confirm, and that refusal must not
+        # be taken for a failure: the room is fine, and closing it would throw it away.
+        second = Proxy(port)
+        second.lose["confirm"] = 1
+        sender = Client(url, ["send", "--file", secret_file])
+        link = link_from(sender)
+        slow = Client(second.url, ["open", link])
+        slow_code = slow.finish(timeout=30)
+        sender.finish(timeout=30)
+        second.close()
+        check("a confirmation that made the room ready and lost its answer still goes on",
+              slow_code == 0 and slow.out.decode() == SECRET,
+              "exit %s: %s" % (slow_code, slow.err.decode()[-200:]))
+
+        # A room that is gone by the time the symbols are confirmed is a room that is gone.
+        expired = Proxy(port)
+        expired.fake["confirm"] = {"ok": False, "err": "notfound"}
+        sender = Client(url, ["send", "--file", secret_file])
+        link = link_from(sender)
+        late = Client(expired.url, ["open", link])
+        late_code = late.finish(timeout=30)
+        sender.finish(timeout=30)
+        expired.close()
+        check("a confirmation that finds no room exits 2, not as a refusal",
+              late_code == 2, "exit %s: %s" % (late_code, late.err.decode()[-200:]))
+
+        # Whoever gives up on an exchange says so to the room, so the other side is not left
+        # waiting for someone who has gone.
+        quitter = Proxy(port)
+        quitter.fake["reveal"] = {"ok": False, "err": "badinput"}
+        sender = Client(quitter.url, ["send", "--file", secret_file])
+        link = link_from(sender)
+        abandoned = Client(url, ["open", link])
+        quit_code = sender.finish(timeout=30)
+        abandoned_code = abandoned.finish(timeout=15)
+        quitter.close()
+        check("a client that gives up does not leave the other side waiting",
+              quit_code != 0 and abandoned_code == 2,
+              "exits %s and %s: %s" % (quit_code, abandoned_code, abandoned.err.decode()[-200:]))
 
         print("\non a real terminal")
 

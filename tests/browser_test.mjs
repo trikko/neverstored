@@ -1204,6 +1204,220 @@ async function main() {
       check("a throw while applying a change does not end it either",
          typeof afterThrow === "string", String(afterThrow));
 
+      console.log("\n  a connection that goes quiet");
+
+      // A phone that changes network leaves its requests open on a connection nobody is at
+      // the other end of, and the browser waits on them for minutes. The stand-in behaves the
+      // way a real fetch does there: no answer, and no error until it is told to stop.
+      const hangingFetch = (op, times) =>
+         "(() => { const real = window.fetch; let hang = " + times + ";"
+         + ` window.fetch = (url, opts) => (hang && String(url).includes('/api/${op}'))`
+         + "    ? (hang--, new Promise((_, fail) => opts && opts.signal"
+         + "       && opts.signal.addEventListener('abort', () => fail(opts.signal.reason))))"
+         + "    : real(url, opts); return true; })()";
+
+      const quiet = await openTab(base + "/");
+      const quietLink = await startRoom(quiet);
+      await quiet.eval(hangingFetch("poll", 1));
+      await enterRoom(quietLink);
+      const pastSilence = await waitFor(() => symbolsOnScreen(quiet), "the sender past a poll that never answers")
+         .catch(() => null);
+      check("a poll that never answers is given up on, and the exchange carries on",
+         typeof pastSilence === "string", String(pastSilence));
+
+      const pairUp = async () => {
+         const host = await openTab(base + "/");
+         const hostLink = await startRoom(host);
+         const guest = await enterRoom(hostLink);
+         await waitFor(() => symbolsOnScreen(host), "the host's symbols");
+         await waitFor(() => symbolsOnScreen(guest), "the guest's symbols");
+         return { host, guest };
+      };
+
+      const confirmBoth = async ({ host, guest }) => {
+         await host.eval("document.getElementById('confirm').click(), 1");
+         await guest.eval("document.getElementById('confirm').click(), 1");
+         await waitFor(() => host.eval("!document.getElementById('handover').disabled || null"),
+            "the handover to open");
+      };
+
+      const statusOf = (tab) => tab.eval("document.getElementById('status').textContent");
+
+      // A confirmation that fails on the way out used to leave its button pressed for good.
+      // When the other side has already confirmed nothing else changes in the room, so
+      // nothing would ever draw the button again: both wait for each other until it expires.
+      const shaky = await pairUp();
+      await shaky.guest.eval("document.getElementById('confirm').click(), 1");
+      await waitFor(() => shaky.host.eval("state.last && state.last.peerConfirmed || null"),
+         "the guest's confirmation to reach the host");
+      await shaky.host.eval(
+         "(() => { const real = window.fetch; let drop = 1;"
+         + " window.fetch = (url, opts) => (drop && String(url).includes('/api/confirm'))"
+         + "    ? (drop--, Promise.reject(new TypeError('Failed to fetch')))"
+         + "    : real(url, opts); return true; })()");
+      await shaky.host.eval("document.getElementById('confirm').click(), 1");
+      const retry = await waitFor(() => shaky.host.eval(
+         "!document.getElementById('confirm').disabled || null"), "the confirm button to come back")
+         .catch(() => null);
+      check("a confirmation lost on the way can be pressed again", retry === true);
+      check("and the page says it did not go through",
+         /did not go through/i.test(await statusOf(shaky.host)), await statusOf(shaky.host));
+
+      await shaky.host.eval("document.getElementById('confirm').click(), 1");
+      const shakyReady = await waitFor(() => shaky.host.eval(
+         "!document.getElementById('handover').disabled || null"), "the room to be ready").catch(() => null);
+      check("and pressing it again gets the room ready", shakyReady === true);
+
+      // A delivery that never left: the button must come back, or the secret is stuck on a
+      // device whose only way to send it is held down.
+      const unsent = await pairUp();
+      await confirmBoth(unsent);
+      await unsent.host.eval(
+         "(() => { const real = window.fetch; let drop = 1;"
+         + " window.fetch = (url, opts) => (drop && String(url).includes('/api/deliver'))"
+         + "    ? (drop--, Promise.reject(new TypeError('Failed to fetch')))"
+         + "    : real(url, opts); return true; })()");
+      await unsent.host.eval("document.getElementById('handover').click(), 1");
+      const sendAgain = await waitFor(() => unsent.host.eval(
+         "!document.getElementById('handover').disabled || null"), "the send button to come back")
+         .catch(() => null);
+      check("a delivery lost on the way can be sent again", sendAgain === true);
+
+      await unsent.host.eval("document.getElementById('handover').click(), 1");
+      const unsentArrived = await waitFor(() => unsent.guest.eval(
+         "(() => { const s = document.querySelector('[data-view=reveal]');"
+         + " return s.hidden ? null : document.getElementById('secret').textContent; })()"),
+         "the secret after a second press").catch(() => null);
+      check("and the second press delivers it", unsentArrived === SECRET, String(unsentArrived));
+
+      // A delivery that landed and whose answer was lost. Pressing again is refused by the
+      // room, since it already holds one, and that refusal is the answer the first press
+      // never got: the secret is there, and saying it did not go through would be false.
+      const landed = await pairUp();
+      await confirmBoth(landed);
+      await landed.guest.eval(
+         "(() => { const real = window.fetch; window.holdPolls = true;"
+         + " window.fetch = (url, opts) => (window.holdPolls && String(url).includes('/api/poll'))"
+         + "    ? Promise.reject(new TypeError('Failed to fetch'))"
+         + "    : real(url, opts); return true; })()");
+      await landed.host.eval(
+         "(() => { const real = window.fetch; let drop = 1;"
+         + " window.fetch = (url, opts) => (drop && String(url).includes('/api/deliver'))"
+         + "    ? (drop--, real(url, opts).then(() => { throw new TypeError('Failed to fetch'); }))"
+         + "    : real(url, opts); return true; })()");
+      await landed.host.eval("document.getElementById('handover').click(), 1");
+      const landedRetry = await waitFor(() => landed.host.eval(
+         "!document.getElementById('handover').disabled || null"), "the send button to come back")
+         .catch(() => null);
+      check("a delivery whose answer was lost does not hold the button", landedRetry === true);
+
+      if (landedRetry) {
+         await landed.host.eval("document.getElementById('handover').click(), 1");
+         const settled = await waitFor(() => landed.host.eval("state.sent || null"), "the page to call it sent")
+            .catch(() => null);
+         check("and a second press that finds it already there calls it sent", settled === true,
+            await statusOf(landed.host));
+         check("without claiming it did not go through",
+            !/did not go through/i.test(await statusOf(landed.host)), await statusOf(landed.host));
+      }
+
+      await landed.guest.eval("window.holdPolls = false, 1");
+      const landedDone = await waitFor(() => landed.host.eval(
+         "!document.querySelector('[data-view=done]').hidden || null"), "the pickup").catch(() => null);
+      check("and it is picked up exactly once", landedDone === true);
+
+      // The poll that carries the ciphertext is also the one that burns the room. Lose its
+      // answer and the secret is gone for good, which is not the same as never having been sent.
+      const robbed = await pairUp();
+      await confirmBoth(robbed);
+      await robbed.guest.eval(
+         "(() => { const real = window.fetch; let drop = 1;"
+         + " window.fetch = (url, opts) => !String(url).includes('/api/poll') ? real(url, opts)"
+         + "    : real(url, opts).then(async (r) => { const b = await r.clone().json();"
+         + "       if (drop && b.ct) { drop--; throw new TypeError('Failed to fetch'); } return r; });"
+         + " return true; })()");
+      await robbed.host.eval("document.getElementById('handover').click(), 1");
+      const robbedSays = await waitFor(() => robbed.guest.eval(
+         "state.finished ? document.getElementById('status').textContent : null"), "the recipient's verdict")
+         .catch(() => null);
+      check("a secret lost on its way to the page is not reported as never sent",
+         robbedSays !== null && !/never sent|nothing was/i.test(robbedSays), String(robbedSays));
+      check("and the page says it was lost on the way",
+         /lost|dropped/i.test(robbedSays || ""), String(robbedSays));
+
+      // Once the symbols matched, a payload that does not open is somebody's doing.
+      const forged = await pairUp();
+      await confirmBoth(forged);
+      await forged.guest.eval(
+         "(() => { const real = window.fetch;"
+         + " window.fetch = (url, opts) => !String(url).includes('/api/poll') ? real(url, opts)"
+         + "    : real(url, opts).then(async (r) => { const b = await r.json();"
+         + "       if (b.ct) b.ct = btoa('x'.repeat(60)); return new Response(JSON.stringify(b)); });"
+         + " return true; })()");
+      await forged.host.eval("document.getElementById('handover').click(), 1");
+      const forgedSays = await waitFor(() => forged.guest.eval(
+         "state.finished ? document.getElementById('status').textContent : null"), "the recipient's verdict")
+         .catch(() => null);
+      check("a payload that does not open is called tampering, not a lost connection",
+         /tamper|interfer/i.test(forgedSays || ""), String(forgedSays));
+
+      // A server that answers, but only to say it cannot help, is as much trouble as one that
+      // does not answer at all, and the page used to keep quiet about it.
+      const refused = await openTab(base + "/");
+      await startRoom(refused);
+      await refused.eval(
+         "(() => { const real = window.fetch;"
+         + " window.fetch = (url, opts) => String(url).includes('/api/poll')"
+         + "    ? Promise.resolve(new Response('{\"ok\":false,\"err\":\"unavailable\"}'))"
+         + "    : real(url, opts); return true; })()");
+      const complaint = await waitFor(() => refused.eval(
+         "/trouble/i.test(document.getElementById('status').textContent) || null"), "the complaint")
+         .catch(() => null);
+      check("a server that keeps refusing is reported as trouble", complaint === true,
+         await statusOf(refused));
+
+      // Past its deadline the room is gone from the server whether or not anyone can reach it
+      // to ask: still trying, under a countdown that reads zero, is a page that never ends.
+      await refused.eval("Object.defineProperty(state, 'expiresAt',"
+         + " { value: Date.now() - 60000, writable: false, configurable: true }), 1");
+      const gaveUp = await waitFor(() => refused.eval(
+         "!document.querySelector('[data-view=expired]').hidden || null"), "the expiry screen")
+         .catch(() => null);
+      check("an unreachable room past its deadline ends as expired", gaveUp === true,
+         await statusOf(refused));
+
+      // Opening a room is the first request a page makes, and it failed in silence.
+      const stranded = await openTab(base + "/");
+      await waitFor(() => stranded.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the app");
+      await stranded.eval(
+         "(() => { const real = window.fetch; let drop = 1;"
+         + " window.fetch = (url, opts) => (drop && String(url).includes('/api/create'))"
+         + "    ? (drop--, Promise.reject(new TypeError('Failed to fetch')))"
+         + "    : real(url, opts); return true; })()");
+      await stranded.eval("document.getElementById('pickRequest').click(), 1");
+      const strandedSays = await waitFor(() => stranded.eval(
+         "(() => { const s = document.getElementById('status').textContent;"
+         + " return /reach|connection/i.test(s) ? s : null; })()"), "the page to say it got no answer")
+         .catch(() => null);
+      check("a room that could not be opened says the service could not be reached",
+         strandedSays !== null, await statusOf(stranded));
+
+      await stranded.eval("document.getElementById('pickRequest').click(), 1");
+      const secondTry = await waitFor(() => stranded.eval("document.getElementById('link').value || null"),
+         "a room on the second try").catch(() => null);
+      check("and trying again opens one", typeof secondTry === "string", String(secondTry));
+
+      const limited = await openTab(base + "/");
+      await waitFor(() => limited.eval("document.readyState === 'complete' && typeof SYMBOLS !== 'undefined'"), "the app");
+      await limited.eval(
+         "(() => { window.fetch = () => Promise.resolve("
+         + "    new Response('{\"ok\":false,\"err\":\"ratelimit\"}')); return true; })()");
+      await limited.eval("document.getElementById('pickRequest').click(), 1");
+      const limitedSays = await waitFor(() => limited.eval(
+         "(() => { const s = document.getElementById('status').textContent;"
+         + " return /too many/i.test(s) ? s : null; })()"), "the rate limit").catch(() => null);
+      check("too many rooms is not called a busy service", limitedSays !== null, await statusOf(limited));
+
       console.log("\n  a room that runs out of time");
 
       const owner = await openTab(base + "/");

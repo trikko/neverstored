@@ -1,5 +1,8 @@
 module wire;
 
+import tty : interrupted;
+
+import core.time : Duration, seconds;
 import std.json : JSONValue, parseJSON;
 
 /// Talks to the same JSON API the page uses. Logical failures come back as {ok:false,err},
@@ -8,16 +11,29 @@ struct Api
 {
    string base;
 
-   JSONValue call(string op, JSONValue request)
+   /+ curl would wait minutes on a connection nobody is at the other end of, and does not
+    + stop for Ctrl-C: a signal only interrupts the wait it is in, and curl starts it again.
+    + The progress callback runs about once a second however quiet the line is, so it is
+    + where both come to an end. A request sent on the way out, after Ctrl-C, is not
+    + interruptible, or it would never leave.
+   +/
+   JSONValue call(string op, JSONValue request, Duration patience = 20.seconds,
+      bool interruptible = true)
    {
       import std.net.curl : HTTP, post, CurlException;
 
       auto http = HTTP();
       http.addRequestHeader("content-type", "application/json");
       http.addRequestHeader("user-agent", "neverstored-cli");
+      http.connectTimeout = patience < 10.seconds ? patience : 10.seconds;
+      http.operationTimeout = patience;
+
+      if (interruptible)
+         http.onProgress = (size_t dlTotal, size_t dlNow, size_t ulTotal, size_t ulNow)
+            => interrupted ? 1 : 0;
 
       try return parseJSON(cast(string) post(base ~ "/api/" ~ op, request.toString(), http));
-      catch (CurlException e) return failure("network");
+      catch (CurlException e) return failure(interruptible && interrupted ? "interrupted" : "network");
       catch (Exception e) return failure("badreply");
    }
 }
